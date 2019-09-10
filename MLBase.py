@@ -7,19 +7,19 @@ class LearnerBase(metaclass=ABCMeta):
 	def fit(self,xtrain,ytrain):
 		pass
 
-	@abstractmethod:
+	@abstractmethod
 	def predict(self,xtest):
 		pass
 	
-	@abstractmethod:
+	@abstractmethod
 	def eval(self,predicts,labels,method=None):
 		pass
 
-	@abstractmethod:
+	@abstractmethod
 	def load_model(self,path):
 		pass
 
-	@abstractmethod:
+	@abstractmethod
 	def save_model(self,path):
 		pass
 	
