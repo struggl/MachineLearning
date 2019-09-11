@@ -29,6 +29,9 @@ class LearnerBase(metaclass=ABCMeta):
 
 class EvaluatorBase(metaclass=ABCMeta):
 	"""所有模型评价指标的基类"""
+	def __init__(self):
+		self._smallDigit = 0.000001
+
 	@abstractmethod
 	def get_all_evaluation_method(self):
 		'''获取所有支持的评价方法'''
@@ -48,7 +51,62 @@ class EvaluatorBase(metaclass=ABCMeta):
 class ClassifierEvaluator(EvaluatorBase):
 	"""分类模型的评价器"""
 	def __init__(self):
+		super().__init__()
 		self._EvaluatorType = 'Classifier'
+
+	def get_all_evaluation_method(self):
+		'''获取所有支持的评价方法'''
+		return {'accuracy','recall','f1-score'}
+
+	def getAccuracy(self,preds,labels):
+		'''计算准确率'''
+		assert type(preds) == np.ndarray and type(labels) == np.ndarray
+		assert 'int' in preds.dtype and 'int' in labels.dtype
+		assert len(preds) != 0 and len(preds) == len(labels)
+
+		return sum(preds==labels) / len(preds)	
+	
+	def getRecall(self,preds,labels):
+		'''计算各类别的召回，返回一个字典'''
+		lbs = set(labels)
+		for lb in lbs:
+			num_lb = 0
+			num_right = 0
+			for i in range(len(preds)):
+				if labels[i] == lb:
+					num_lb += 1
+					if preds[i] == lb:
+						num_right += 1
+			#这里的num_lb不需要加上一个极小数
+			lbs[lb] = num_right / num_lb
+		return lbs	
+
+	def getPrecision(self,preds,labels):
+		'''计算各类别的精度，返回一个字典'''
+		lbs = set(labels)
+		for lb in lbs:
+			num_lb = 0
+			num_right = 0
+			for i in range(len(preds)):
+				if preds[i] == lb:
+					num_lb += 1
+					if labels[i] == lb:
+						num_right += 1
+			#注意，对于特定类别，模型预测为该类的样本数量可能为0
+			lbs[lb] = num_right / (num_lb+self.smallDigit)
+		return lbs	
+
+	def getF1score(self,preds,labels):
+		'''计算各类别的f1-score，返回一个字典'''
+		P = self.getPrecison(preds,labels)
+		R = self.getRecall(preds,labels)
+		F1 = dict()
+		#注意，对于一个特定的类，P与R可能都取0
+		for k in P.keys():
+			F1[k] = 2*P[k]*R[k] / (P[k]+R[k]+self.smallDigit)	
+		return F1		
+			
+		
 		
 class RegressorEvaluator(EvaluatorBase):
 	"""回归模型的评价器"""
@@ -125,7 +183,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 	
 	def _fit(self,xtrain,ytrain):
 		'''训练决策树分类器'''
-		assert type(xtrain) is np.ndarray and type(ytrain) is np.ndarray
+		assert type(xtrain) == np.ndarray and type(ytrain) == np.ndarray
 		assert xtrain.ndim == 2	and ytrain.ndim == 1
 		assert 'int' in ytrain.dtype				
 
