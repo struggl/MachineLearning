@@ -3,11 +3,13 @@ import numpy as np
 
 class LearnerBase(metaclass=ABCMeta):
 	"""所有学习器的基类"""
-	__slots__ = '_learnerType','_evaluator','_reader'
+	__slots__ = '_learnerType','_evaluator','_reader','_cur_model','_stored_model'
 	def __init__(self,learnerType=None,evaluator=None,reader=None):
 		self._rearnerType = learnerType
 		self._evaluator = evaluator
 		self._reader = reader
+		self._cur_model = None
+		self._stored_model = None
 
 	@abstractmethod
 	def fit(self,xtrain,ytrain):
@@ -55,6 +57,7 @@ class EvaluatorBase(metaclass=ABCMeta):
 		'''
 	def getEvaluatorType(self):
 		return self._evaluatorType
+
 
 class ClassifierEvaluator(EvaluatorBase):
 	"""分类模型的评价器"""
@@ -113,30 +116,39 @@ class ClassifierEvaluator(EvaluatorBase):
 	#----------------------------------公开接口----------------------------------
 	def get_all_evaluation_method(self):
 		'''获取所有支持的评价方法'''
-		return {'accuracy','recall','f1-score'}
+		return {'accuracy','precision','recall','f1-score'}
 		
 	def eval(self,predictions,labels,method=None):
 		'''指定方法对模型结果进行评价
 		Args:
 			method:str.可选值在get_all_evaluation_method返回的集合中
 		'''		
-		if method is None:
-			return self._getF1score(predictions,labels)
-		
+		if method is None or method == 'f1-score':
+			return self._getF1score(predictions,labels)	
+	
 		if method not in self.get_all_evaluation_method():
 			raise ValueError('method参数仅支持以下取值: '+repr(self.get_all_evaluation_method()))
+
+		if method == 'accuracy':
+			return self._getAccuracy(predictions,labels)
+		if method == 'precison':
+			return self._getPrecison(predictions,labels)
+		if method == 'recall':
+			return self._getRecall(predictions,labels)
 
 class RegressorEvaluator(EvaluatorBase):
 	"""回归模型的评价器"""
 	def __init__(self):
 		self._EvaluatorType = 'Regressor'
 
+
 class ClassifierBase(LearnerBase):
 	"""所有分类器的基类"""
-	def __init__(self,data_path,reader=None):
+	def __init__(self,dataDir,reader=None):
 		self._learnerType = 'Classifier'
 		self._evaluator = ClassifierEvaluator()	
-		self._reader = reader if reader is not None else tsvReader(data_path)
+		self._reader = reader if reader is not None else tsvReader(dataDir)
+
 
 class RegressorBase(LearnerBase):
 	"""所有回归器的基类"""
@@ -145,13 +157,12 @@ class RegressorBase(LearnerBase):
 		self._Evaluator = RegressorEvaluator()	
 
 
-
 class ReaderBase(metaclass=ABCMeta):
 	"""数据读取器基类,读取器对象存储数据，并提供数据预处理的方法"""
-	__slots__ = '_dataPath'
+	__slots__ = '_dataDir'
 	
-	def __init__(self,dataPath=None):
-		self._dataPath = dataPath
+	def __init__(self,dataDir=None):
+		self._dataDir = dataDir
 	
 	@abstractmethod
 	def read(self):
@@ -160,37 +171,112 @@ class ReaderBase(metaclass=ABCMeta):
 	
 class tsvReader(ReaderBase):
 	'''tsv格式的读取器'''
-	def __init__(self,dataPath):
-		super().__init__(dataPath)
+	def __init__(self,dataDir):
+		super().__init__(dataDir)
 
+	def _read(self,path,bool_read_first_line=True):
+		fr = open(path,'r',encoding='utf-8')
+		x = []
+		y = []
+		n = 0
+		for line in path:
+			if bool_read_first_line == False and n == 0:
+				continue
+			example = line.strip().split('\t')
+			x.append(example[:-1])
+			y.append(example[-1])
+		return np.asarray(x),np.asarray(y)	
+		
 	def read(self):	
+		self._read(dataDir+'/train.tsv')
+		self._read(dataDir+'/test.tsv')
+		try:
+			self._read(dataDir+'/eval.tsv')
+		except FileNotFoundError:
+			self.xeval,self.yeval = self.xtest,self.ytest 
+
 
 class NotTrainedError(Exception):
 	pass	
 
+
 class DecisionTreeClassifierBase(ClassifierBase):
-	'''决策树分类器的基类'''	
-	__slots__ = '_tree'	
-
-	def __init__(self,data_path,reader=None):
-		super().__init__(data_path,reader)
-		self._tree = None
-
-	def _fixdata(self,xtrain):
-		raise NotImplementedError	
-
+	'''决策树分类器基类'''
 	def _majority_class(self,ytrain):
 		freq = {}
 		for lb in ytrain:
-			freq[lb] += 1	
+			freq[lb] = freq.setdefault(lb,0) + 1	
 		return sorted(freq.items(),key=lambda x:x[1],reverse=True)[0][0]
 
+	def _assert_xdata(self,xdata):
+		assert type(xdata) is np.ndarray
+		assert xdata.ndim == 2 
+
+	def _assert_ydata(self,ydata):
+		assert type(ydata) is np.ndarray
+		assert ydata.ndim == 1
+		assert 'int' in ytrain.dtype
+
+	def _calInformationEntropy(self,xdata,ydata):
+		'''给定数据集D，计算数据集D的信息熵,信息熵取值越小越好.令K为类别数量，
+		Ent(D) = - sum_{k=1}^K p_k*log(p_k,2),其中p_k为第k类在数据集中出现的频率
+		'''
+		self._assert_xdata(xdata)
+		self._assert_ydata(ydata)
+		from math import log
+		totalEnt = 0.0
+		lbFreq = {}
+		for lb in ydata:
+			lbFreq[lb] = lbFreq.setdefault(lb,0) + 1
+		nexample = len(xdata)	
+		for k in lbFreq.keys():
+			p_k = float(lbFreq[k]) / nexample
+			totalEnt -= p_k * log(p_k,2) 
+		return totalEnt
+			
+	def _calGini(self,xdata,ydata):
+		'''给定数据集D，计算数据集D的基尼指数，基尼指数取值越小越好。令K为类别数量，
+		Gini(D) = 1 - sum_{k=1}^K p_k^2,其中p_k为第k类在数据集中出现的频率
+		'''	
+		self._assert_xdata(xdata)
+		self._assert_ydata(ydata)
+		lbFreq = {}
+		for lb in ydata:
+			lbFreq[lb] = lbFreq.setdefault(lb,0) + 1
+		nexample = len(xdata)	
+		Gini = 0
+		for k in lbFreq.keys():
+			p_k = float(lbFreq[k]) / nexample
+			Gini += p_k ** 2
+		Gini = 1 - Gini
+		return Gini
+
+	def _calInformationGain(self,xdata,ydata,feat):
+		'''给定数据集D和属性feat，计算属性feat的信息增益'''
+		pass
+
+	def _calInformaitonGainRatio(self,xdata,ydata,feat):
+		'''给定数据集D和属性feat，计算属性feat的信息增益率'''
+		pass
+
+	def _calGiniIndex(self,xdata,ydata,feat):
+		'''给定数据集D和属性feat，计算属性feat的基尼指数'''
+		pass
+			
+			
+	
+
+class ID3Classifier(DecisionTreeClassifierBase):
+	'''ID3决策树分类器'''	
+	def __init__(self,dataDir,reader=None):
+		super().__init__(dataDir,reader)
+	
 	def _chooseBestFeatureToSplit(self,xtrain,ytrain):
-		'''选择最优划分特征'''
+		'''使用信息熵选择最优划分特征'''
 		raise NotImplementedError
 
 	def _splitDataSet(self,xtrain,ytrain,feat,val):
-		'''根据特征的特定值获取子数据集，该数据集不再含有指定的feat列'''
+		'''根据特征的特定值获取子数据集(ID3决策树要求自变量全部为离散型)，该数据集不再含有指定的feat列'''
 		rows = set()
 		for i in range(len(xtrain)):
 			if feat[i][feat] == val:
@@ -201,15 +287,9 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			xtrain[rw] = xtrain[rw][:feat].extend(xtrain[rw][feat+1:])
 			ytrain[rw] = ytrain[rw]
 		return np.asarray(xtrain),np.asarray(ytrain)
-	
+
 	def _fit(self,xtrain,ytrain):
 		'''训练决策树分类器'''
-		assert type(xtrain) == np.ndarray and type(ytrain) == np.ndarray
-		assert xtrain.ndim == 2	and ytrain.ndim == 1
-		assert 'int' in ytrain.dtype				
-
-		self._fixdata()			#修复数据的钩子，例如ID3决策树要求所有数值均为标称型数据	
-
 		if ytrain.count(ytrain[0]) == len(ytrain):	#递归返回情况1：所有类别相同
 			return tuple(ytrain[0])
 
@@ -226,8 +306,9 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		return resDict	
 			
 	'''---------------------------------公开方法--------------------------------'''
-	def fit(self):
-		"""模型拟合的公开接口，根结点统一使用'root'作为键，包括根结点在内的所有内部结点都是dict对象，唯独叶结点是tuple对象
+	def fit(self,xtrain=None,ytrain=None):
+		"""模型拟合的公开接口。若训练数据集未直接提供，则使用self._reader读取训练数据集
+		决策树模型中，根结点统一使用'root'作为键，包括根结点在内的所有内部结点都是dict对象，唯独叶结点是tuple对象
 		模型示例一(当数据集仅有一个特征而导致决策树直接预测众数类或者数据集所有类别相同时)：
 		#注意，此处label1的取值可能与特征列索引数字重合
 		{
@@ -251,21 +332,29 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			}
 		}
 		"""
-		self._reader.read()	#使用数据读取器对象读取数据
-		self._tree = {}
-		self._tree['root'] = self._fit(self._xtrain,self._ytrain)
+		self._cur_model = {}
+		if xtrain is None or ytrain is None:
+			self._reader.read()	#使用数据读取器对象读取数据
+			self._cur_model['root'] = self._fit(self._reader._xtrain,self._reader._ytrain)
+		else:
+			self._assert_xdata(xtrain)
+			self._assert_ydata(ytrain)
+			self._cur_model['root'] = self._fit(xtrain,ytrain)
+			
 				
-	def prediect(self,xtest):
+	def prediect(self,xtest,bool_use_stored_model=False):
 		'''模型预测的公开接口'''
-		#assert type(xtest) is np.ndarray
-		#assert xtest.ndim == 2 
-		if self._tree is None or self._tree['root'] == {}:
+		self._assert_xdata(xtest)
+		if bool_use_stored_model:
+			use_model = self._stored_model
+		else:
+			use_model = self._cur_model
+		if self.use_model is None or use_model['root'] == {}:
 			raise NotTrainedError('决策树分类器尚未训练!')
-		self._fixdata()	
 
 		preds = [None] * len(xtest) 
 		for i in range(len(xtest)):
-			tree = self._tree['root']
+			tree = use_model['root']
 			#仅当tree变量是字典的时候才可以迭代feat,否则可能引发IndexError,下面while的处理也是这个原因
 			if type(tree) is dict:		
 				feat = next(iter(tree.keys()))
@@ -275,6 +364,11 @@ class DecisionTreeClassifierBase(ClassifierBase):
 					feat = xtest[i][feat]
 			preds[i] = tree[0]
 		return np.asarray(preds)
+
+	def eval(self,method=None):
+		preds = self.predict(self.xeval,bool_use_stored_model=False)	
+		return self._evaluator.eval(preds,self.yeval) 
+			
 
 if __name__ == '__main__':
 	obj = ClassifierEvaluator()
