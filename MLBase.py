@@ -3,14 +3,6 @@ import numpy as np
 
 class LearnerBase(metaclass=ABCMeta):
 	"""所有学习器的基类"""
-	__slots__ = '_learnerType','_evaluator','_reader','_cur_model','_stored_model'
-	def __init__(self,learnerType=None,evaluator=None,reader=None):
-		self._rearnerType = learnerType
-		self._evaluator = evaluator
-		self._reader = reader
-		self._cur_model = None
-		self._stored_model = None
-
 	@abstractmethod
 	def fit(self,xtrain,ytrain):
 		pass
@@ -23,11 +15,11 @@ class LearnerBase(metaclass=ABCMeta):
 	def eval(self,predicts,labels,method=None):
 		pass
 
-	@abstractmethod
+	#@abstractmethod
 	def load_model(self,path):
 		pass
 
-	@abstractmethod
+	#@abstractmethod
 	def save_model(self,path):
 		pass
 	
@@ -68,13 +60,15 @@ class ClassifierEvaluator(EvaluatorBase):
 	def _getAccuracy(self,preds,labels):
 		'''计算准确率'''
 		assert type(preds) == np.ndarray and type(labels) == np.ndarray
-		assert 'int' in preds.dtype and 'int' in labels.dtype
+		assert preds.dtype == 'int64' or preds.dtype == 'int32' 
+		assert labels.dtype == 'int64' or labels.dtype == 'int32' 
 		assert len(preds) != 0 and len(preds) == len(labels)
 
 		return sum(preds==labels) / len(preds)	
 	
 	def _getRecall(self,preds,labels):
 		'''计算各类别的召回，返回一个字典'''
+		res = {}
 		lbs = set(labels)
 		for lb in lbs:
 			num_lb = 0
@@ -85,11 +79,12 @@ class ClassifierEvaluator(EvaluatorBase):
 					if preds[i] == lb:
 						num_right += 1
 			#这里的num_lb不需要加上一个极小数
-			lbs[lb] = num_right / num_lb
-		return lbs	
+			res[lb] = num_right / num_lb
+		return res	
 
 	def _getPrecision(self,preds,labels):
 		'''计算各类别的精度，返回一个字典'''
+		res = {}
 		lbs = set(labels)
 		for lb in lbs:
 			num_lb = 0
@@ -100,17 +95,17 @@ class ClassifierEvaluator(EvaluatorBase):
 					if labels[i] == lb:
 						num_right += 1
 			#注意，对于特定类别，模型预测为该类的样本数量可能为0
-			lbs[lb] = num_right / (num_lb+self.smallDigit)
-		return lbs	
+			res[lb] = num_right / (num_lb+self._smallDigit)
+		return res	
 
 	def _getF1score(self,preds,labels):
 		'''计算各类别的f1-score，返回一个字典'''
-		P = self._getPrecison(preds,labels)
+		P = self._getPrecision(preds,labels)
 		R = self._getRecall(preds,labels)
 		F1 = dict()
 		#注意，对于一个特定的类，P与R可能都取0
 		for k in P.keys():
-			F1[k] = 2*P[k]*R[k] / (P[k]+R[k]+self.smallDigit)	
+			F1[k] = 2*P[k]*R[k] / (P[k]+R[k]+self._smallDigit)	
 		return F1		
 			
 	#----------------------------------公开接口----------------------------------
@@ -131,8 +126,8 @@ class ClassifierEvaluator(EvaluatorBase):
 
 		if method == 'accuracy':
 			return self._getAccuracy(predictions,labels)
-		if method == 'precison':
-			return self._getPrecison(predictions,labels)
+		if method == 'precision':
+			return self._getPrecision(predictions,labels)
 		if method == 'recall':
 			return self._getRecall(predictions,labels)
 
@@ -144,10 +139,15 @@ class RegressorEvaluator(EvaluatorBase):
 
 class ClassifierBase(LearnerBase):
 	"""所有分类器的基类"""
+	__slots__ = '_learnerType','_evaluator','_reader','_cur_model','_stored_model'
 	def __init__(self,dataDir,reader=None):
 		self._learnerType = 'Classifier'
 		self._evaluator = ClassifierEvaluator()	
 		self._reader = reader if reader is not None else tsvReader(dataDir)
+		self._reader.read()
+		self._reader.transformLabelToInt64()
+		self._cur_model = None
+		self.stored_model = None
 
 
 class RegressorBase(LearnerBase):
@@ -175,26 +175,35 @@ class tsvReader(ReaderBase):
 		super().__init__(dataDir)
 
 	def _read(self,path,bool_read_first_line=True):
+		'''读取数据为np.ndarray,且dtype为float64,默认最后一列为标签列'''
 		fr = open(path,'r',encoding='utf-8')
 		x = []
 		y = []
 		n = 0
-		for line in path:
+		for line in fr:
 			if bool_read_first_line == False and n == 0:
 				continue
-			example = line.strip().split('\t')
+			example = [float(feat) for feat in line.strip().split('\t')]
 			x.append(example[:-1])
 			y.append(example[-1])
 		return np.asarray(x),np.asarray(y)	
 		
 	def read(self):	
-		self._read(dataDir+'/train.tsv')
-		self._read(dataDir+'/test.tsv')
+		self._xtrain,self._ytrain = self._read(self._dataDir+'/train.tsv')
+		self._xtest,self._ytest = self._read(self._dataDir+'/test.tsv')
 		try:
-			self._read(dataDir+'/eval.tsv')
+			self._xeval,self._yeval = self._read(self._dataDir+'/eval.tsv')
 		except FileNotFoundError:
-			self.xeval,self.yeval = self.xtest,self.ytest 
+			self._xeval,self._yeval = self._xtest,self._ytest 
 
+	def transformLabelToInt64(self):
+		if type(self._ytrain) != None:
+			self._ytrain = np.asarray(self._ytrain,dtype='int64')	
+		if type(self._ytest) != None:
+			self._ytest = np.asarray(self._ytest,dtype='int64')	
+		if type(self._yeval) != None:
+			self._yeval = np.asarray(self._yeval,dtype='int64')	
+			
 
 class NotTrainedError(Exception):
 	pass	
@@ -211,18 +220,18 @@ class DecisionTreeClassifierBase(ClassifierBase):
 	def _assert_xdata(self,xdata):
 		assert type(xdata) is np.ndarray
 		assert xdata.ndim == 2 
+		assert len(xdata) != 0
 
 	def _assert_ydata(self,ydata):
 		assert type(ydata) is np.ndarray
 		assert ydata.ndim == 1
-		assert 'int' in ytrain.dtype
+		assert ydata.dtype == 'int64' or ydata.dtype == 'int32'
+		assert len(ydata) != 0
 
 	def _calInformationEntropy(self,xdata,ydata):
 		'''给定数据集D，计算数据集D的信息熵,信息熵取值越小越好.令K为类别数量，
 		Ent(D) = - sum_{k=1}^K p_k*log(p_k,2),其中p_k为第k类在数据集中出现的频率
 		'''
-		self._assert_xdata(xdata)
-		self._assert_ydata(ydata)
 		from math import log
 		totalEnt = 0.0
 		lbFreq = {}
@@ -238,8 +247,6 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		'''给定数据集D，计算数据集D的基尼指数，基尼指数取值越小越好。令K为类别数量，
 		Gini(D) = 1 - sum_{k=1}^K p_k^2,其中p_k为第k类在数据集中出现的频率
 		'''	
-		self._assert_xdata(xdata)
-		self._assert_ydata(ydata)
 		lbFreq = {}
 		for lb in ydata:
 			lbFreq[lb] = lbFreq.setdefault(lb,0) + 1
@@ -252,17 +259,52 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		return Gini
 
 	def _calInformationGain(self,xdata,ydata,feat):
-		'''给定数据集D和属性feat，计算属性feat的信息增益'''
-		pass
-
+		'''给定数据集D和属性feat，计算属性feat的信息增益.
+		假设属性feat上取值为{a_1,...,a_v,...a_V},对应划分得到的子数据集(不含feat这一列)为{D^1,...,D^v,...,D^V}则
+		Gain(D,a) = Ent(D) - sum_{v=1}^V p_v*Ent(D^v),其中p_v表示属性取值a_v在原数据集中的数量占比 
+		'''
+		self._assert_xdata(xdata)
+		self._assert_ydata(ydata)
+		baseInformationEntropy = self._calInformationEntropy(xdata,ydata)
+		featValSet = set([example[feat] for example in xdata])
+		nexample = float(len(xdata))
+		newInformationEntropy = 0.0
+		for val in featValSet:
+			cur_xdata,cur_ydata = self._splitDataSet(xdata,ydata,feat,val,False)
+			p_v = len(cur_xdata) / nexample
+			newInformationEntropy += p_v * self._calInformationEntropy(cur_xdata,cur_ydata)
+		InformationGain = baseInformationEntropy - newInformationEntropy
+		return InformationGain	
+												
 	def _calInformaitonGainRatio(self,xdata,ydata,feat):
 		'''给定数据集D和属性feat，计算属性feat的信息增益率'''
 		pass
 
 	def _calGiniIndex(self,xdata,ydata,feat):
 		'''给定数据集D和属性feat，计算属性feat的基尼指数'''
-		pass
+		self._assert_xdata(xdata)
+		self._assert_ydata(ydata)
 			
+	def _splitDataSet(self,xtrain,ytrain,feat,val,bool_contain_feat_column=False):
+		'''获取子数据集feat列上取值为val的子数据集
+		Args:
+			xtrain:np.ndarray,二维特征向量
+			ytrain:np.ndarray,维度是一。
+			feat:python int.指定列索引
+			val:python int.指定feat列的取值
+			bool_contain_feat_column:bool.若为True,则采用CART决策树的二元划分策略，子数据集仍然包含feat这一列;
+				否则子数据集不保留feat所在列。
+		'''
+		if bool_contain_feat_column:
+			raise NotImplementedError
+		xdata = []
+		ydata = []
+		for i in range(len(xtrain)):
+			if xtrain[i][feat] == val:
+				xdata.append(np.concatenate([xtrain[i][:feat],xtrain[i][feat+1:]]))
+				ydata.append(ytrain[i])
+		return np.asarray(xdata,dtype=xtrain.dtype),np.asarray(ydata,dtype=ytrain.dtype)
+
 			
 	
 
@@ -272,38 +314,48 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		super().__init__(dataDir,reader)
 	
 	def _chooseBestFeatureToSplit(self,xtrain,ytrain):
-		'''使用信息熵选择最优划分特征'''
-		raise NotImplementedError
-
-	def _splitDataSet(self,xtrain,ytrain,feat,val):
-		'''根据特征的特定值获取子数据集(ID3决策树要求自变量全部为离散型)，该数据集不再含有指定的feat列'''
-		rows = set()
-		for i in range(len(xtrain)):
-			if feat[i][feat] == val:
-				rows.add(i)	
-		xtrain = [None]*len(rows)
-		ytrain = [None]*len(rows)
-		for rw in rows:
-			xtrain[rw] = xtrain[rw][:feat].extend(xtrain[rw][feat+1:])
-			ytrain[rw] = ytrain[rw]
-		return np.asarray(xtrain),np.asarray(ytrain)
+		'''使用信息熵选择最优划分特征,若数据集特征数不大于1或最优划分的信息增益不为正，则返回None
+		'''
+		numFeat = len(xtrain[0])
+		if numFeat <= 1:
+			return None
+		bestGain = 0.0
+		bestFeat = None
+		for feat in range(numFeat):
+			curGain = self._calInformationGain(xtrain,ytrain,feat)
+			if curGain > bestGain:
+				bestGain = curGain
+				bestFeat = feat
+		if bestFeat != None and bestGain > 0:
+			return bestFeat	
+		return None
 
 	def _fit(self,xtrain,ytrain):
 		'''训练决策树分类器'''
-		if ytrain.count(ytrain[0]) == len(ytrain):	#递归返回情况1：所有类别相同
-			return tuple(ytrain[0])
+		freq = 0
+		for lb in ytrain:
+			if lb == ytrain[0]:
+				freq += 1
+		if freq == len(ytrain):	#递归返回情况1：所有类别相同
+			return (ytrain[0],)
 
-		if len(xtrain[0]) == 1:				#递归返回情况2：无法继续切分特征时，返回众数类
-			return tuple(_majority_class(ytrain))
-		
 		bestFeat = self._chooseBestFeatureToSplit(xtrain,ytrain)	#选择最优划分特征
+		if bestFeat is None:				#递归返回情况2：无法继续切分特征时，返回众数类
+			return (self._majority_class(ytrain),)
+		
 		bestFeatVals = set([example[bestFeat] for example in xtrain])
 		
 		resDict = {bestFeat:{}}
-		for val in bestFeatVals:	#对最优特征的每个值尝试构建子树	
+		for val in bestFeatVals:	#对最优特征的每个值构建子树	
 			cur_xtrain,cur_ytrain = self._splitDataSet(xtrain,ytrain,bestFeat,val)
 			resDict[val] = self._fit(cur_xtrain,cur_ytrain)
+		print(resDict)
 		return resDict	
+
+	def _fixdata(self):
+		self._reader._xtrain = np.asarray(self._reader._xtrain,dtype='int64')
+		self._reader._xtest = np.asarray(self._reader._xtest,dtype='int64')
+		self._reader._xeval = np.asarray(self._reader._xeval,dtype='int64')
 			
 	'''---------------------------------公开方法--------------------------------'''
 	def fit(self,xtrain=None,ytrain=None):
@@ -331,10 +383,33 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				}
 			}
 		}
+		###实际上建立的树为：
+		{
+		'root': {
+			3: {}, 
+			0: 
+				{
+				1: 
+					{
+					0: (1,), 
+					1: 
+						{
+						2: {}, 
+						0: (1,), 
+						1: (0,)
+						}
+					}, 
+				0: (1,), 
+				2: (0,)
+				}, 
+			1: (0,), 
+			2: (0,)
+			}
+		}
 		"""
 		self._cur_model = {}
 		if xtrain is None or ytrain is None:
-			self._reader.read()	#使用数据读取器对象读取数据
+			self._fixdata()
 			self._cur_model['root'] = self._fit(self._reader._xtrain,self._reader._ytrain)
 		else:
 			self._assert_xdata(xtrain)
@@ -342,18 +417,23 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			self._cur_model['root'] = self._fit(xtrain,ytrain)
 			
 				
-	def prediect(self,xtest,bool_use_stored_model=False):
+	def predict(self,xtest=None,bool_use_stored_model=False):
 		'''模型预测的公开接口'''
-		self._assert_xdata(xtest)
 		if bool_use_stored_model:
 			use_model = self._stored_model
 		else:
 			use_model = self._cur_model
-		if self.use_model is None or use_model['root'] == {}:
+		if use_model is None or use_model['root'] == {}:
 			raise NotTrainedError('决策树分类器尚未训练!')
 
-		preds = [None] * len(xtest) 
-		for i in range(len(xtest)):
+		if xtest is None:
+			cur_xtest = self._reader.xtest
+		else:
+			cur_xtest = np.asarray(xtest)
+			self._assert_xdata(cur_xtest)
+
+		preds = [None] * len(cur_xtest) 
+		for i in range(len(cur_xtest)):
 			tree = use_model['root']
 			#仅当tree变量是字典的时候才可以迭代feat,否则可能引发IndexError,下面while的处理也是这个原因
 			if type(tree) is dict:		
@@ -361,16 +441,22 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			while isinstance(tree,dict):
 				tree = tree[feat]
 				if type(tree) is dict:
-					feat = xtest[i][feat]
+					feat = cur_xtest[i][feat]
 			preds[i] = tree[0]
 		return np.asarray(preds)
 
 	def eval(self,method=None):
-		preds = self.predict(self.xeval,bool_use_stored_model=False)	
-		return self._evaluator.eval(preds,self.yeval) 
+		preds = self.predict(self._reader._xeval,bool_use_stored_model=False)	
+		return self._evaluator.eval(preds,self._reader._yeval) 
 			
 
 if __name__ == '__main__':
-	obj = ClassifierEvaluator()
-	obj.eval('a','b','c')
-
+	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data')
+	#print(type(obj._reader))
+	print(obj._reader._xtrain)
+	#print(obj._reader._xtrain.dtype)
+	#obj._fixdata()
+	#print(obj._reader._xtrain)
+	#print(obj._reader._xtrain.dtype)
+	obj.fit()
+	print(obj._cur_model)
