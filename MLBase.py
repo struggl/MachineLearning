@@ -327,8 +327,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				bestGain = curGain
 				bestFeat = feat
 		if bestFeat != None and bestGain > 0:
-			return bestFeat	
-		return None
+			return bestFeat
+		return None	
 
 	def _fit(self,xtrain,ytrain):
 		'''训练决策树分类器'''
@@ -348,8 +348,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		resDict = {bestFeat:{}}
 		for val in bestFeatVals:	#对最优特征的每个值构建子树	
 			cur_xtrain,cur_ytrain = self._splitDataSet(xtrain,ytrain,bestFeat,val)
-			resDict[val] = self._fit(cur_xtrain,cur_ytrain)
-		print(resDict)
+			resDict[bestFeat][val] = self._fit(cur_xtrain,cur_ytrain)
 		return resDict	
 
 	def _fixdata(self):
@@ -369,6 +368,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		}
 
 		模型的形式二：
+		特点是，进入root结点后，若为字典，则仅有一个键，该键对应着特征的序号，
+		接着是一个可能拥有多个键的字典，不同的键对应着由于特征向量上该特征的不同取值而划分的不同子树
 		{
 		'root':
 			{
@@ -384,26 +385,35 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			}
 		}
 		###实际上建立的树为：
-		{
 		'root': {
-			3: {}, 
-			0: 
+			3: 
 				{
-				1: 
+				0: 
 					{
-					0: (1,), 
 					1: 
 						{
-						2: {}, 
 						0: (1,), 
-						1: (0,)
+						1: 
+							{
+							0: 
+								{
+								0: (1,), 
+								1: 
+									{
+									2: 
+										{
+										0: (1,), 
+										1: (0,)
+										}
+									}
+								}
+							}, 
+						2: (0,)
 						}
 					}, 
-				0: (1,), 
+				1: (0,), 
 				2: (0,)
-				}, 
-			1: (0,), 
-			2: (0,)
+				}
 			}
 		}
 		"""
@@ -437,17 +447,21 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			tree = use_model['root']
 			#仅当tree变量是字典的时候才可以迭代feat,否则可能引发IndexError,下面while的处理也是这个原因
 			if type(tree) is dict:		
+				#当前分裂点对应的特征
 				feat = next(iter(tree.keys()))
 			while isinstance(tree,dict):
-				tree = tree[feat]
+				#根据当前分裂点对应特征的取值进入子树
+				feat_val = cur_xtest[i][feat]
+				tree = tree[feat][feat_val]
 				if type(tree) is dict:
-					feat = cur_xtest[i][feat]
-			preds[i] = tree[0]
+					feat = next(iter(tree.keys()))
+			if not isinstance(tree,dict):
+				preds[i] = tree[0]
 		return np.asarray(preds)
 
 	def eval(self,method=None):
 		preds = self.predict(self._reader._xeval,bool_use_stored_model=False)	
-		return self._evaluator.eval(preds,self._reader._yeval) 
+		return preds,self._evaluator.eval(preds,self._reader._yeval) 
 			
 
 if __name__ == '__main__':
@@ -455,8 +469,15 @@ if __name__ == '__main__':
 	#print(type(obj._reader))
 	print(obj._reader._xtrain)
 	#print(obj._reader._xtrain.dtype)
-	#obj._fixdata()
-	#print(obj._reader._xtrain)
+	obj._fixdata()
+	print(obj._reader._xtrain)
 	#print(obj._reader._xtrain.dtype)
 	obj.fit()
 	print(obj._cur_model)
+	#print 验证集上预测结果
+	print(obj.eval()[0])
+	#print 验证集上评价结果
+	print(obj.eval()[1])
+	#执行预测
+	print(obj.predict([[0,0,0,0,0,0]]))
+	print(obj.predict([[1,1,1,1,1,0]]))
