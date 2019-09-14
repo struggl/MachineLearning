@@ -15,11 +15,11 @@ class LearnerBase(metaclass=ABCMeta):
 	def eval(self,predicts,labels,method=None):
 		pass
 
-	#@abstractmethod
+	@abstractmethod
 	def load_model(self,path):
 		pass
 
-	#@abstractmethod
+	@abstractmethod
 	def save_model(self,path):
 		pass
 	
@@ -174,18 +174,18 @@ class tsvReader(ReaderBase):
 	def __init__(self,dataDir):
 		super().__init__(dataDir)
 
-	def _read(self,path,bool_read_first_line=True):
+	def _read(self,path):
 		'''读取数据为np.ndarray,且dtype为float64,默认最后一列为标签列'''
 		fr = open(path,'r',encoding='utf-8')
 		x = []
 		y = []
-		n = 0
 		for line in fr:
-			if bool_read_first_line == False and n == 0:
-				continue
-			example = [float(feat) for feat in line.strip().split('\t')]
-			x.append(example[:-1])
-			y.append(example[-1])
+			try:
+				example = [float(feat) for feat in line.strip().split('\t')]
+				x.append(example[:-1])
+				y.append(example[-1])
+			except ValueError:
+				print('------{}------'.format(path))
 		return np.asarray(x),np.asarray(y)	
 		
 	def read(self):	
@@ -214,7 +214,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 	def _majority_class(self,ytrain):
 		freq = {}
 		for lb in ytrain:
-			freq[lb] = freq.setdefault(lb,0) + 1	
+			freq[lb] = freq.get(lb,0) + 1	
 		return sorted(freq.items(),key=lambda x:x[1],reverse=True)[0][0]
 
 	def _assert_xdata(self,xdata):
@@ -236,7 +236,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		totalEnt = 0.0
 		lbFreq = {}
 		for lb in ydata:
-			lbFreq[lb] = lbFreq.setdefault(lb,0) + 1
+			lbFreq[lb] = lbFreq.get(lb,0) + 1
 		nexample = len(xdata)	
 		for k in lbFreq.keys():
 			p_k = float(lbFreq[k]) / nexample
@@ -249,7 +249,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		'''	
 		lbFreq = {}
 		for lb in ydata:
-			lbFreq[lb] = lbFreq.setdefault(lb,0) + 1
+			lbFreq[lb] = lbFreq.get(lb,0) + 1
 		nexample = len(xdata)	
 		Gini = 0
 		for k in lbFreq.keys():
@@ -459,25 +459,48 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				preds[i] = tree[0]
 		return np.asarray(preds)
 
-	def eval(self,method=None):
-		preds = self.predict(self._reader._xeval,bool_use_stored_model=False)	
-		return preds,self._evaluator.eval(preds,self._reader._yeval) 
+	def eval(self,bool_use_stored_model=False,method=None):
+		preds = self.predict(self._reader._xeval,bool_use_stored_model)	
+		return preds,self._evaluator.eval(preds,self._reader._yeval,method) 
+
+	def save_model(self,path=None):
+		'''决策树分类器存储为二进制形式'''
+		if self._cur_model is None or self._cur_model['root'] == {}:
+			raise NotTrainedError
+		if path is None:
+			cur_path = self._reader._dataDir + '/ID3Classifier.pkl'
+		else:
+			cur_path = path
+		import pickle
+		with open(cur_path,'wb') as f:
+			pickle.dump(self._cur_model,f)
+	
+	def load_model(self,path=None):
+		'''载入二进制模型'''
+		if path is None:
+			cur_path = self._reader._dataDir + '/ID3Classifier.pkl'
+		else:
+			cur_path = path
+		import pickle
+		with open(cur_path,'rb') as f:
+			self._stored_model = pickle.load(f)
+		
 			
 
 if __name__ == '__main__':
-	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data')
-	#print(type(obj._reader))
+	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
 	print(obj._reader._xtrain)
-	#print(obj._reader._xtrain.dtype)
 	obj._fixdata()
 	print(obj._reader._xtrain)
-	#print(obj._reader._xtrain.dtype)
-	obj.fit()
-	print(obj._cur_model)
-	#print 验证集上预测结果
-	print(obj.eval()[0])
-	#print 验证集上评价结果
-	print(obj.eval()[1])
+	#obj.fit()
+	obj.load_model()
+	#print(obj._cur_model)
+	print(obj._stored_model)
+	#验证集上预测结果
+	print(obj.eval(bool_use_stored_model=True)[0])
+	#验证集上评价结果
+	print(obj.eval(True,method='f1-score')[1])
 	#执行预测
-	print(obj.predict([[0,0,0,0,0,0]]))
-	print(obj.predict([[1,1,1,1,1,0]]))
+	print(obj.predict([[0,0,0,0,0,0]],True))
+	print(obj.predict([[1,1,1,1,1,0]],True))
+	#obj.save_model()
