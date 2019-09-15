@@ -482,7 +482,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		return preds,self._evaluator.eval(preds,self._reader._yeval,method) 
 
 	def save_model(self,path=None):
-		'''决策树分类器存储为二进制形式'''
+		'''决策树分类器序列化'''
 		if self._cur_model is None or self._cur_model._children == {}:
 			raise self.NotTrainedError
 		if path is None:
@@ -494,7 +494,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			pickle.dump(self._cur_model,f)
 	
 	def load_model(self,path=None):
-		'''载入二进制模型'''
+		'''载入模型'''
 		if path is None:
 			cur_path = self._reader._dataDir + '/ID3Classifier.pkl'
 		else:
