@@ -1,4 +1,5 @@
 from abc import ABCMeta,abstractmethod
+import collections
 import numpy as np
 
 class LearnerBase(metaclass=ABCMeta):
@@ -213,6 +214,105 @@ class tsvReader(ReaderBase):
 
 class DecisionTreeClassifierBase(ClassifierBase):
 	'''决策树分类器基类'''
+	class Node(object):
+		'''决策树的结点类'''
+		def __init__(self,feature=None,label=None,examples=None,parent=None,height=None):
+			'''
+			Args:
+				feature:存储当前结点的划分属性
+				label:若为叶结点，则_label属性存储了该叶结点的标签
+				examples:每个结点存储了自己拥有的样本的序号(可迭代对象)
+				parent父结点，根结点设置为None
+				height:结点的高度
+			'''
+			self._feature = feature
+			self._children = collections.OrderedDict()
+			#若为叶结点，则_label属性存储了该叶结点的标签
+			self._label = label
+			self._examples = examples
+			self._parent = parent	
+			self._height = height
+	
+		def showAttributes(self):
+			print('_feature:'+repr(self._feature))
+			print('_children:'+repr(self._children))
+			print('_label:'+repr(self._label))
+			print('_examples:'+repr(self._examples))
+			print('_parent:'+repr(self._parent))
+			print('_height:'+repr(self._height))
+	
+	class DecisionTree(object):
+		'''决策树数据结构'''
+		def __init__(self):
+			self._size = 0
+			self._root = None
+			self._height = None
+
+		def __len__(self):
+			return self._size
+
+		def _validate(self,node):
+			if not isinstance(node,Node):
+				raise TypeError
+
+		def is_leaf(self,node):
+			self._validate(node)
+			return node._children == {}
+
+		def is_root(self,node):
+			self._validate(node)
+			return self._root is node
+
+		#-----------------------------访问方法-----------------------------
+		def preorder(self,node=None):
+			'''从node开始进行前序遍历，若node为None，则从根开始遍历,返回一个迭代器'''
+			if isinstance(node,Node):
+				yield node
+				if not self.is_leaf(node):
+					for child in self.children(node):
+						self.preorder(child)	
+
+		def parent(self,node):
+			'''返回给定node的父结点'''
+			self._validate(node)
+			return node._parent
+
+		def children(self,node):
+			'''返回给定结点node的孩子结点的迭代器'''
+			self._validate(node)
+			for k in node._children.keys():
+				yield node._children.get(k)
+
+		def num_children(self,node):
+			self._validate(node)
+			if self.is_leaf(node):
+				return 0
+			else:
+				return len(node._children)
+			
+ 
+		#-----------------------------更新方法------------------------------				
+		def add_root(self,feature=None,label=None,examples=None,parent=None,height=None):
+			T._root = Node(feature=feature,label=label,examples=examples,parent=parent,height=0)
+			T._height = 0
+			T._size = 1
+
+		def add_children(self,parent_node,key,feature=None,label=None,examples=None,parent=None,height=None):
+			'''根据key为parent_node添加孩子child'''
+			self._validate(parent_node)
+			child = Node(feature=feature,label=label,examples=examples,parent=parent,height=parent_node._height+1)
+			parent_node._children[key] = child
+			child._parent = parent_node
+			T._size += 1
+			T._height = max(T._height,child._height)
+		
+		def delete(self,node):
+			self._validate(node)	
+			#指针修改
+			#T的高度属性
+			#T._size减1
+			self._size -= 1	
+
 	def _majority_class(self,ytrain):
 		freq = {}
 		for lb in ytrain:
@@ -321,33 +421,6 @@ class DecisionTreeClassifierBase(ClassifierBase):
 
 class ID3Classifier(DecisionTreeClassifierBase):
 	'''ID3决策树分类器'''	
-	class Node(object):
-		'''决策树的结点类'''
-		def __init__(self,feature=None,label=None,examples=None,parent=None,height=None):
-			'''
-			Args:
-				feature:存储当前结点的划分属性
-				label:若为叶结点，则_label属性存储了该叶结点的标签
-				examples:每个结点存储了自己拥有的样本的序号(可迭代对象)
-				parent父结点，根结点设置为None
-				height:结点的高度
-			'''
-			self._feature = feature
-			self._children = {}
-			#若为叶结点，则_label属性存储了该叶结点的标签
-			self._label = label
-			self._examples = examples
-			self._parent = parent	
-			self._height = height
-	
-		def showAttributes(self):
-			print('_feature:'+repr(self._feature))
-			print('_children:'+repr(self._children))
-			print('_label:'+repr(self._label))
-			print('_examples:'+repr(self._examples))
-			print('_parent:'+repr(self._parent))
-			print('_height:'+repr(self._height))
-				
 	def __init__(self,dataDir,reader=None):
 		super().__init__(dataDir,reader)
 	
@@ -504,20 +577,24 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			self._stored_model = pickle.load(f)
 
 
+
+
 if __name__ == '__main__':
 	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
 	print(obj._reader._xtrain)
 	obj._fixdata()
 	print(obj._reader._xtrain)
-	#obj.fit()
+	obj.fit()
 	#obj.save_model()
-	obj.load_model()
+	#obj.load_model()
 	#print(obj._cur_model)
 	#obj._cur_model.showAttributes()
 	#print(obj._stored_model)
 	#验证集上预测结果
-	print(obj.eval(bool_use_stored_model=True)[0])
-	print(obj.eval(bool_use_stored_model=True)[1])
+	print(obj.eval(bool_use_stored_model=False)[0])
+	print(obj.eval(bool_use_stored_model=False)[1])
+	#print(obj.eval(bool_use_stored_model=True)[0])
+	#print(obj.eval(bool_use_stored_model=True)[1])
 	#print(obj.eval(bool_use_stored_model=True)[0])
 	#验证集上评价结果
 	#print(obj.eval(True,method='f1-score')[1])
