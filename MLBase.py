@@ -322,8 +322,9 @@ class DecisionTreeClassifierBase(ClassifierBase):
 class ID3Classifier(DecisionTreeClassifierBase):
 	'''ID3决策树分类器'''	
 	class Node(object):
+		'''决策树的结点类'''
 		def __init__(self,feature=None,label=None,examples=None,parent=None,height=None):
-			'''决策树的结点类
+			'''
 			Args:
 				feature:存储当前结点的划分属性
 				label:若为叶结点，则_label属性存储了该叶结点的标签
