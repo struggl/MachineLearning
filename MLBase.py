@@ -3,6 +3,12 @@ import numpy as np
 
 class LearnerBase(metaclass=ABCMeta):
 	"""所有学习器的基类"""
+	class NotTrainedError(Exception):
+		pass
+		
+	class PredictionError(Exception):
+		pass
+	
 	@abstractmethod
 	def fit(self,xtrain,ytrain):
 		pass
@@ -205,10 +211,6 @@ class tsvReader(ReaderBase):
 			self._yeval = np.asarray(self._yeval,dtype='int64')	
 			
 
-class NotTrainedError(Exception):
-	pass	
-
-
 class DecisionTreeClassifierBase(ClassifierBase):
 	'''决策树分类器基类'''
 	def _majority_class(self,ytrain):
@@ -285,13 +287,16 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		self._assert_xdata(xdata)
 		self._assert_ydata(ydata)
 			
-	def _splitDataSet(self,xtrain,ytrain,feat,val,bool_contain_feat_column=False):
+	def _splitDataSet(self,xtrain,ytrain,feat,val,
+				bool_return_examples=True,
+				bool_contain_feat_column=False):
 		'''获取子数据集feat列上取值为val的子数据集
 		Args:
 			xtrain:np.ndarray,二维特征向量
 			ytrain:np.ndarray,维度是一。
 			feat:python int.指定列索引
 			val:python int.指定feat列的取值
+			bool_return_examples:bool.若为True,返回xtrain的feat列上取值为val的那些样本索引的可迭代对象
 			bool_contain_feat_column:bool.若为True,则采用CART决策树的二元划分策略，子数据集仍然包含feat这一列;
 				否则子数据集不保留feat所在列。
 		'''
@@ -299,17 +304,49 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			raise NotImplementedError
 		xdata = []
 		ydata = []
+		examples = set()
 		for i in range(len(xtrain)):
 			if xtrain[i][feat] == val:
+				examples.add(i)
 				xdata.append(np.concatenate([xtrain[i][:feat],xtrain[i][feat+1:]]))
 				ydata.append(ytrain[i])
-		return np.asarray(xdata,dtype=xtrain.dtype),np.asarray(ydata,dtype=ytrain.dtype)
+		xdata,ydata = np.asarray(xdata,dtype=xtrain.dtype),np.asarray(ydata,dtype=ytrain.dtype)
+		if bool_return_examples:
+			return xdata,ydata,examples
+		else:
+			return xdata,ydata
 
 			
 	
 
 class ID3Classifier(DecisionTreeClassifierBase):
 	'''ID3决策树分类器'''	
+	class Node(object):
+		def __init__(self,feature=None,label=None,examples=None,parent=None,height=None):
+			'''决策树的结点类
+			Args:
+				feature:存储当前结点的划分属性
+				label:若为叶结点，则_label属性存储了该叶结点的标签
+				examples:每个结点存储了自己拥有的样本的序号(可迭代对象)
+				parent父结点，根结点设置为None
+				height:结点的高度
+			'''
+			self._feature = feature
+			self._children = {}
+			#若为叶结点，则_label属性存储了该叶结点的标签
+			self._label = label
+			self._examples = examples
+			self._parent = parent	
+			self._height = height
+	
+		def showAttributes(self):
+			print('_feature:'+repr(self._feature))
+			print('_children:'+repr(self._children))
+			print('_label:'+repr(self._label))
+			print('_examples:'+repr(self._examples))
+			print('_parent:'+repr(self._parent))
+			print('_height:'+repr(self._height))
+				
 	def __init__(self,dataDir,reader=None):
 		super().__init__(dataDir,reader)
 	
@@ -330,8 +367,9 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			return bestFeat
 		return None	
 
-	def _fit(self,xtrain,ytrain):
+	def _fit(self,xtrain,ytrain,examples,height,limit_height=None,alpha=None):
 		'''训练决策树分类器'''
+		'''
 		freq = 0
 		for lb in ytrain:
 			if lb == ytrain[0]:
@@ -350,6 +388,38 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			cur_xtrain,cur_ytrain = self._splitDataSet(xtrain,ytrain,bestFeat,val)
 			resDict[bestFeat][val] = self._fit(cur_xtrain,cur_ytrain)
 		return resDict	
+		'''
+		#----------------------------------new _fit method----------------------------
+		#新增参数examples,由fit方法初始化为range(len(self._reader._xtrain))
+		freq = 0
+		for lb in ytrain:
+			if lb == ytrain[0]:
+				freq += 1
+		if freq == len(ytrain):	#递归返回情况1：所有类别相同
+			return self.Node(label=ytrain[0],
+					examples=examples,
+					height=height+1)
+
+		bestFeat = self._chooseBestFeatureToSplit(xtrain,ytrain)	#选择最优划分特征
+		if bestFeat is None:				#递归返回情况2：无法继续切分特征时，返回众数类
+			return self.Node(label=self._majority_class(ytrain),
+					examples=examples,
+					height=height+1)
+		
+		bestFeatVals = set([example[bestFeat] for example in xtrain])
+		
+		resNode = self.Node(feature=bestFeat,examples=examples,height=height+1)
+	
+		for val in bestFeatVals:	#对最优特征的每个值构建子树	
+			#_splitDataSet方法需要新增一个返回，记录xtrain中bestFea等于val的那些行
+			cur_xtrain,cur_ytrain,cur_examples = self._splitDataSet(xtrain,ytrain,bestFeat,val)
+			newChild = self._fit(xtrain=cur_xtrain,
+						ytrain=cur_ytrain,
+						examples=cur_examples,
+						height=resNode._height+1)
+			resNode._children[val] = newChild
+			newChild._parent = resNode
+		return resNode	
 
 	def _fixdata(self):
 		self._reader._xtrain = np.asarray(self._reader._xtrain,dtype='int64')
@@ -357,74 +427,27 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		self._reader._xeval = np.asarray(self._reader._xeval,dtype='int64')
 			
 	'''---------------------------------公开方法--------------------------------'''
-	def fit(self,xtrain=None,ytrain=None):
+	def fit(self,xtrain=None,
+			ytrain=None,
+			examples=None,
+			height=None,
+			limit_height=None,
+			alpha=None):
 		"""模型拟合的公开接口。若训练数据集未直接提供，则使用self._reader读取训练数据集
-		决策树模型中，根结点统一使用'root'作为键，包括根结点在内的所有内部结点都是dict对象，唯独叶结点是tuple对象
-		模型示例一(当数据集仅有一个特征而导致决策树直接预测众数类或者数据集所有类别相同时)：
-		#注意，此处label1的取值可能与特征列索引数字重合
-		{
-		'root':
-			(label1,)
-		}
-
-		模型的形式二：
-		特点是，进入root结点后，若为字典，则仅有一个键，该键对应着特征的序号，
-		接着是一个可能拥有多个键的字典，不同的键对应着由于特征向量上该特征的不同取值而划分的不同子树
-		{
-		'root':
-			{
-			0:
-				{
-				0:('100',)
-				1:
-					{
-					0:('100',)
-					1:('10000',)
-					}
-				}
-			}
-		}
-		###实际上建立的树为：
-		'root': {
-			3: 
-				{
-				0: 
-					{
-					1: 
-						{
-						0: (1,), 
-						1: 
-							{
-							0: 
-								{
-								0: (1,), 
-								1: 
-									{
-									2: 
-										{
-										0: (1,), 
-										1: (0,)
-										}
-									}
-								}
-							}, 
-						2: (0,)
-						}
-					}, 
-				1: (0,), 
-				2: (0,)
-				}
-			}
-		}
 		"""
-		self._cur_model = {}
 		if xtrain is None or ytrain is None:
 			self._fixdata()
-			self._cur_model['root'] = self._fit(self._reader._xtrain,self._reader._ytrain)
+			self._cur_model = self._fit(xtrain=self._reader._xtrain,
+							ytrain=self._reader._ytrain,
+							examples=range(len(self._reader._xtrain)),
+							height=-1)
 		else:
 			self._assert_xdata(xtrain)
 			self._assert_ydata(ytrain)
-			self._cur_model['root'] = self._fit(xtrain,ytrain)
+			self._cur_model = self._fit(xtrain=xtrain,
+							ytrain=ytrain,
+							examples=range(len(self._reader._xtrain)),
+							height=-1)
 			
 				
 	def predict(self,xtest=None,bool_use_stored_model=False):
@@ -433,8 +456,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			use_model = self._stored_model
 		else:
 			use_model = self._cur_model
-		if use_model is None or use_model['root'] == {}:
-			raise NotTrainedError('决策树分类器尚未训练!')
+		if use_model is None or use_model._children == {}:
+			raise self.NotTrainedError('决策树分类器尚未训练!')
 
 		if xtest is None:
 			cur_xtest = self._reader.xtest
@@ -444,19 +467,13 @@ class ID3Classifier(DecisionTreeClassifierBase):
 
 		preds = [None] * len(cur_xtest) 
 		for i in range(len(cur_xtest)):
-			tree = use_model['root']
-			#仅当tree变量是字典的时候才可以迭代feat,否则可能引发IndexError,下面while的处理也是这个原因
-			if type(tree) is dict:		
-				#当前分裂点对应的特征
-				feat = next(iter(tree.keys()))
-			while isinstance(tree,dict):
-				#根据当前分裂点对应特征的取值进入子树
-				feat_val = cur_xtest[i][feat]
-				tree = tree[feat][feat_val]
-				if type(tree) is dict:
-					feat = next(iter(tree.keys()))
-			if not isinstance(tree,dict):
-				preds[i] = tree[0]
+			node = use_model
+			try:
+				while node._label is None and node._children != {}:
+					node = node._children[cur_xtest[i][node._feature]]
+			except KeyError:
+				raise self.PredictionError('待预测样本 {} 某个属性出现了新的取值!'.format(repr(cur_xtest[i])))
+			preds[i] = node._label	
 		return np.asarray(preds)
 
 	def eval(self,bool_use_stored_model=False,method=None):
@@ -465,8 +482,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 
 	def save_model(self,path=None):
 		'''决策树分类器存储为二进制形式'''
-		if self._cur_model is None or self._cur_model['root'] == {}:
-			raise NotTrainedError
+		if self._cur_model is None or self._cur_model._children == {}:
+			raise self.NotTrainedError
 		if path is None:
 			cur_path = self._reader._dataDir + '/ID3Classifier.pkl'
 		else:
@@ -484,8 +501,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		import pickle
 		with open(cur_path,'rb') as f:
 			self._stored_model = pickle.load(f)
-		
-			
+
 
 if __name__ == '__main__':
 	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
@@ -493,14 +509,19 @@ if __name__ == '__main__':
 	obj._fixdata()
 	print(obj._reader._xtrain)
 	#obj.fit()
+	#obj.save_model()
 	obj.load_model()
 	#print(obj._cur_model)
-	print(obj._stored_model)
+	#obj._cur_model.showAttributes()
+	#print(obj._stored_model)
 	#验证集上预测结果
 	print(obj.eval(bool_use_stored_model=True)[0])
+	print(obj.eval(bool_use_stored_model=True)[1])
+	#print(obj.eval(bool_use_stored_model=True)[0])
 	#验证集上评价结果
-	print(obj.eval(True,method='f1-score')[1])
+	#print(obj.eval(True,method='f1-score')[1])
 	#执行预测
-	print(obj.predict([[0,0,0,0,0,0]],True))
-	print(obj.predict([[1,1,1,1,1,0]],True))
+	#print(obj.predict([[0,0,0,0,0,0]]))
+	#print(obj.predict([[10,10,10,10,10,10]]))
+	#print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
