@@ -399,7 +399,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			ytrain:np.ndarray,维度是一。
 			feat:python int.指定列索引
 			val:python int.指定feat列的取值
-			bool_return_examples:bool.若为True,返回xtrain的feat列上取值为val的那些样本索引的可迭代对象
+			bool_return_examples:bool.若为True,返回xtrain的feat列上取值为val的那些样本索引的可迭代对象(且支持__len__)
 			bool_contain_feat_column:bool.若为True,则采用CART决策树的二元划分策略，子数据集仍然包含feat这一列;
 				否则子数据集不保留feat所在列。
 		'''
@@ -582,9 +582,9 @@ if __name__ == '__main__':
 	print(obj._reader._xtrain)
 	obj._fixdata()
 	print(obj._reader._xtrain)
-	#obj.fit()
+	obj.fit()
 	#obj.save_model()
-	obj.load_model()
+	#obj.load_model()
 	#print(obj._cur_model)
 	#obj._cur_model._root.showAttributes()
 	#print(obj._stored_model)
@@ -596,14 +596,14 @@ if __name__ == '__main__':
 		#print(node)
 	#	node.showAttributes()
 	print('---')
-	#print(obj.eval(bool_use_stored_model=False)[0])
-	#print(obj.eval(bool_use_stored_model=False)[1])
+	print(obj.eval(bool_use_stored_model=False)[0])
+	print(obj.eval(bool_use_stored_model=False)[1])
 	#print(obj.eval(bool_use_stored_model=True)[0])
 	#print(obj.eval(bool_use_stored_model=True)[1])
 	#验证集上评价结果
-	print(obj.eval(bool_use_stored_model=True,method='f1-score')[1])
+	#print(obj.eval(bool_use_stored_model=True,method='f1-score')[1])
 	#执行预测
 	#print(obj.predict([[0,0,0,0,0,0]]))
 	#print(obj.predict([[10,10,10,10,10,10]]))
-	print(obj.predict([[1,1,1,1,1,0]],True))
+	#print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
