@@ -252,7 +252,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			return self._size
 
 		def _validate(self,node):
-			if not isinstance(node,Node):
+			if not isinstance(node,DecisionTreeClassifierBase.Node):
 				raise TypeError
 
 		def is_leaf(self,node):
@@ -263,14 +263,26 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			self._validate(node)
 			return self._root is node
 
-		#-----------------------------访问方法-----------------------------
-		def preorder(self,node=None):
+		def _preorder(self,node=None):
 			'''从node开始进行前序遍历，若node为None，则从根开始遍历,返回一个迭代器'''
-			if isinstance(node,Node):
+			if isinstance(node,DecisionTreeClassifierBase.Node):
 				yield node
 				if not self.is_leaf(node):
 					for child in self.children(node):
-						self.preorder(child)	
+						self._preorder(child)	
+		#-----------------------------访问方法-----------------------------
+		def preorder(self,node=None):
+			'''从node开始进行前序遍历，若node为None，则从根开始遍历,返回一个迭代器'''
+			if node is None:
+				node = self._root
+			if isinstance(node,DecisionTreeClassifierBase.Node):
+				yield node
+				if not self.is_leaf(node):
+					for child in self.children(node):
+						for nd in self.preorder(child):
+							yield nd
+			#for nd in self._preorder(node):
+			#	yield nd
 
 		def parent(self,node):
 			'''返回给定node的父结点'''
@@ -280,8 +292,8 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		def children(self,node):
 			'''返回给定结点node的孩子结点的迭代器'''
 			self._validate(node)
-			for k in node._children.keys():
-				yield node._children.get(k)
+			for v in node._children.values():
+				yield v
 
 		def num_children(self,node):
 			self._validate(node)
@@ -482,7 +494,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		Args:
 			alpha_leaf:后剪枝对叶结点的正则化超参数,有效取值大于等于0.
 		'''
-		if self._cur_model is None or self._cur_model._children == {}:
+		if self._cur_model is None or self._cur_model._root is None or self._cur_model._root._children == {}:
 			raise self.NotTrainedError('无法进行剪枝，因为决策树分类器尚未训练!')
 			
 			
@@ -500,17 +512,19 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		"""
 		if xtrain is None or ytrain is None:
 			self._fixdata()
-			self._cur_model = self._fit(xtrain=self._reader._xtrain,
-							ytrain=self._reader._ytrain,
-							examples=range(len(self._reader._xtrain)),
-							depth=-1)
+			self._cur_model = self.DecisionTree()
+			self._cur_model._root = self._fit(xtrain=self._reader._xtrain,
+								ytrain=self._reader._ytrain,
+								examples=range(len(self._reader._xtrain)),
+								depth=-1)
 		else:
 			self._assert_xdata(xtrain)
 			self._assert_ydata(ytrain)
-			self._cur_model = self._fit(xtrain=xtrain,
-							ytrain=ytrain,
-							examples=range(len(self._reader._xtrain)),
-							depth=-1)
+			self._cur_model = self.DecisionTree()
+			self._cur_model._root = self._fit(xtrain=xtrain,
+								ytrain=ytrain,
+								examples=range(len(self._reader._xtrain)),
+								depth=-1)
 		if bool_prune:
 			self._prune(alpha_leaf=alpha_leaf)	
 				
@@ -520,7 +534,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			use_model = self._stored_model
 		else:
 			use_model = self._cur_model
-		if use_model is None or use_model._children == {}:
+		if use_model is None or use_model._root is None or use_model._root._children == {}:
 			raise self.NotTrainedError('无法进行预测，因为决策树分类器尚未训练!')
 
 		if xtest is None:
@@ -531,7 +545,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 
 		preds = [None] * len(cur_xtest) 
 		for i in range(len(cur_xtest)):
-			node = use_model
+			node = use_model._root
 			try:
 				while node._label is None and node._children != {}:
 					node = node._children[cur_xtest[i][node._feature]]
@@ -546,8 +560,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 
 	def save_model(self,path=None):
 		'''决策树分类器序列化'''
-		if self._cur_model is None or self._cur_model._children == {}:
-			raise self.NotTrainedError
+		if self._cur_model is None or self._cur_model._root is None or self._cur_model._root._children == {}:
+			raise self.NotTrainedError('无法进行模型序列化，因为决策树分类器尚未训练!')
 		if path is None:
 			cur_path = self._reader._dataDir + '/ID3Classifier.pkl'
 		else:
@@ -583,6 +597,17 @@ if __name__ == '__main__':
 	#验证集上预测结果
 	print(obj.eval(bool_use_stored_model=False)[0])
 	print(obj.eval(bool_use_stored_model=False)[1])
+	#print(type(obj._cur_model))
+	#print(type(obj._cur_model._root))
+	#print(type(obj._cur_model.preorder(obj._cur_model._root)))
+	#print(obj._cur_model._root._children[0]._children)
+	#print(obj._cur_model._root._children=={})
+	for nd in (obj._cur_model.children(obj._cur_model._root)):
+		print(nd)
+	print('---')
+	for node in obj._cur_model.preorder():
+		#print(node._children[0]._children)
+		print(node)
 	#print(obj.eval(bool_use_stored_model=True)[0])
 	#print(obj.eval(bool_use_stored_model=True)[1])
 	#print(obj.eval(bool_use_stored_model=True)[0])
