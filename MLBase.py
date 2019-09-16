@@ -7,7 +7,7 @@ class LearnerBase(metaclass=ABCMeta):
 	class NotTrainedError(Exception):
 		pass
 		
-	class PredictedDataError(Exception):
+	class PredictionError(Exception):
 		pass
 	
 	@abstractmethod
@@ -257,7 +257,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 
 		def is_leaf(self,node):
 			self._validate(node)
-			return node._children == {}
+			return node._children == {} and node._label != None
 
 		def is_root(self,node):
 			self._validate(node)
@@ -315,13 +315,17 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			child._parent = parent_node
 			T._size += 1
 			T._depth = max(T._depth,child._depth)
-		
-	def _majority_class(self,ytrain):
-		freq = {}
-		for lb in ytrain:
-			freq[lb] = freq.get(lb,0) + 1	
-		return sorted(freq.items(),key=lambda x:x[1],reverse=True)[0][0]
 
+	def bool_not_trained(self,tree=None):
+		'''判断决策树是否已经训练,仅判断根结点，默认在_fit和_prune方法的更新过程中其余结点维护了相应的特性'''
+		if tree is None:
+			tree = self._cur_model
+		if tree is None or tree._root is None:
+			return True
+		if tree._root._children == {} and tree._root._label is None:
+			return True
+		return False
+		
 	def _assert_xdata(self,xdata):
 		assert type(xdata) is np.ndarray
 		assert xdata.ndim == 2 
@@ -333,10 +337,22 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		assert ydata.dtype == 'int64' or ydata.dtype == 'int32'
 		assert len(ydata) != 0
 
+	def _majority_class(self,ytrain):
+		ytrain = np.asarray(ytrain)
+		self._assert_ydata(ytrain)
+		freq = {}
+		for lb in ytrain:
+			freq[lb] = freq.get(lb,0) + 1	
+		return sorted(freq.items(),key=lambda x:x[1],reverse=True)[0][0]
+
 	def _calInformationEntropy(self,xdata,ydata):
 		'''给定数据集D，计算数据集D的信息熵,信息熵取值越小越好.令K为类别数量，
 		Ent(D) = - sum_{k=1}^K p_k*log(p_k,2),其中p_k为第k类在数据集中出现的频率
 		'''
+		xdata = np.asarray(xdata)
+		ydata = np.asarray(ydata)
+		self._assert_xdata(xdata)
+		self._assert_ydata(ydata)
 		from math import log
 		totalEnt = 0.0
 		lbFreq = {}
@@ -352,6 +368,10 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		'''给定数据集D，计算数据集D的基尼指数，基尼指数取值越小越好。令K为类别数量，
 		Gini(D) = 1 - sum_{k=1}^K p_k^2,其中p_k为第k类在数据集中出现的频率
 		'''	
+		xdata = np.asarray(xdata)
+		ydata = np.asarray(ydata)
+		self._assert_xdata(xdata)
+		self._assert_ydata(ydata)
 		lbFreq = {}
 		for lb in ydata:
 			lbFreq[lb] = lbFreq.get(lb,0) + 1
@@ -368,6 +388,8 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		假设属性feat上取值为{a_1,...,a_v,...a_V},对应划分得到的子数据集(不含feat这一列)为{D^1,...,D^v,...,D^V}则
 		Gain(D,a) = Ent(D) - sum_{v=1}^V p_v*Ent(D^v),其中p_v表示属性取值a_v在原数据集中的数量占比 
 		'''
+		xdata = np.asarray(xdata)
+		ydata = np.asarray(ydata)
 		self._assert_xdata(xdata)
 		self._assert_ydata(ydata)
 		baseInformationEntropy = self._calInformationEntropy(xdata,ydata)
@@ -383,10 +405,16 @@ class DecisionTreeClassifierBase(ClassifierBase):
 												
 	def _calInformaitonGainRatio(self,xdata,ydata,feat):
 		'''给定数据集D和属性feat，计算属性feat的信息增益率'''
+		xdata = np.asarray(xdata)
+		ydata = np.asarray(ydata)
+		self._assert_xdata(xdata)
+		self._assert_ydata(ydata)
 		pass
 
 	def _calGiniIndex(self,xdata,ydata,feat):
 		'''给定数据集D和属性feat，计算属性feat的基尼指数'''
+		xdata = np.asarray(xdata)
+		ydata = np.asarray(ydata)
 		self._assert_xdata(xdata)
 		self._assert_ydata(ydata)
 			
@@ -405,6 +433,10 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		'''
 		if bool_contain_feat_column:
 			raise NotImplementedError
+		xtrain = np.asarray(xtrain)
+		ytrain = np.asarray(ytrain)
+		self._assert_xdata(xtrain)
+		self._assert_ydata(ytrain)
 		xdata = []
 		ydata = []
 		examples = set()
@@ -480,9 +512,32 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		self._reader._xtest = np.asarray(self._reader._xtest,dtype='int64')
 		self._reader._xeval = np.asarray(self._reader._xeval,dtype='int64')
 
-	def _loss(self,node):
+	def _get_examples(self,node):
+		'''获取node存放的样本'''
 		self._cur_model._validate(node)
-		
+		n = len(node._examples)
+		xdata = [None] * n
+		ydata = [None] * n
+		i = 0
+		for idx in node._examples:
+			xdata[i] = self._reader._xtrain[idx]
+			ydata[i] = self._reader._ytrain[idx]
+			i += 1
+		return np.asarray(xdata),np.asarray(ydata)
+	
+	def _loss(self,node):
+		xdata,ydata = self._get_examples(node)
+		return self._calInformationEntropy(xdata,ydata)
+
+	#def bool_not_trained(self,tree=None):
+	#	if tree is None:
+	#		tree = self._cur_model
+	#	if tree is None or tree._root is None:
+	#		return True
+	#	if tree._root._children == {} and tree._root._label is None:
+	#		return True
+	#	return False
+				
 
 	def _prune(self,alpha_leaf):
 		'''决策树模型后剪枝的实现
@@ -498,7 +553,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		Args:
 			alpha_leaf:后剪枝对叶结点的正则化超参数,有效取值大于等于0.
 		'''
-		if self._cur_model is None or self._cur_model._root is None or self._cur_model._root._children == {}:
+		if self.bool_not_trained():
 			raise self.NotTrainedError('无法进行剪枝，因为决策树分类器尚未训练!')
 		if alpha_leaf < 0:
 			raise ValueError('alpha_leaf必须非负!')
@@ -507,7 +562,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		leafs = collections.deque()
 		for nd in self._cur_model.preorder():
 			if self._cur_model.is_leaf(nd):
-				leafs.add(nd)
+				leafs.append(nd)
 
 		#初始化叶结点数量为原树的叶结点个数
 		len_before = len(leafs)
@@ -573,9 +628,14 @@ class ID3Classifier(DecisionTreeClassifierBase):
 					兄弟结点还在队列中，遍历到这些兄弟结点时，由while循环开头利用new_leafs
 					过滤掉即可
 				'''
-				leafs.add(nd._parent)
-				nd._parent._label = sorted(nd._parent._children.values(),
-								key=lambda x:len(x._examples()))[-1]._label
+				leafs.append(nd._parent)
+				if self._cur_model.is_root(nd._parent):
+					_,ydata = self._get_examples(nd._parent)
+					nd._parent._label = self._majority_class(ydata) 
+				if self._cur_model.is_root(nd._parent):
+					print('++++++++')
+					nd._parent.showAttributes()
+					print('++++++++')
 				nd._parent._children.clear()
 				len_before = len_after
 					
@@ -617,6 +677,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 								examples=range(len(self._reader._xtrain)),
 								depth=-1)
 		else:
+			xtrain = np.asarray(xtrain)
+			ytrain = np.asarray(ytrain)
 			self._assert_xdata(xtrain)
 			self._assert_ydata(ytrain)
 			self._cur_model = self.DecisionTree()
@@ -634,7 +696,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			
 		else:
 			use_model = self._cur_model
-		if use_model is None or use_model._root is None or use_model._root._children == {}:
+		if self.bool_not_trained(use_model):
 			raise self.NotTrainedError('无法进行预测，因为决策树分类器尚未训练!')
 
 		if xtest is None:
@@ -643,6 +705,10 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			cur_xtest = np.asarray(xtest)
 			self._assert_xdata(cur_xtest)
 
+		if use_model.is_leaf(use_model._root):
+			preds = [use_model._root._label] * len(cur_xtest)
+			return np.asarray(preds)
+
 		preds = [None] * len(cur_xtest) 
 		for i in range(len(cur_xtest)):
 			node = use_model._root
@@ -650,7 +716,12 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				while node._label is None and node._children != {}:
 					node = node._children[cur_xtest[i][node._feature]]
 			except KeyError:
-				raise self.PredictedDataError('待预测样本 {} 某个属性出现了新的取值!'.format(repr(cur_xtest[i])))
+				raise self.PredictionError('待预测样本 {} 某个属性出现了新的取值!'.format(repr(cur_xtest[i])))
+			if node._label is None:
+				print('++++')
+				node.showAttributes()
+				print('++++')
+				raise self.PredictionError('叶结点_label属性取值为None!')
 			preds[i] = node._label	
 		return np.asarray(preds)
 
@@ -660,7 +731,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 
 	def save_model(self,path=None):
 		'''决策树分类器序列化'''
-		if self._cur_model is None or self._cur_model._root is None or self._cur_model._root._children == {}:
+		if self.bool_not_trained():
 			raise self.NotTrainedError('无法进行模型序列化，因为决策树分类器尚未训练!')
 		if path is None:
 			cur_path = self._reader._dataDir + '/ID3Classifier.pkl'
@@ -687,25 +758,26 @@ class ID3Classifier(DecisionTreeClassifierBase):
 
 if __name__ == '__main__':
 	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
-	print(obj._reader._xtrain)
-	obj._fixdata()
-	print(obj._reader._xtrain)
-	obj.fit()
+	#print(obj._reader._xtrain)
+	#obj._fixdata()
+	#print(obj._reader._xtrain)
+	obj.fit(alpha_leaf=0.01)
 	#obj.save_model()
 	#obj.load_model()
+	#print('*************')
 	#print(obj._cur_model)
+	#print('*************')
 	#obj._cur_model._root.showAttributes()
 	#print(obj._stored_model)
 	#验证集上预测结果
-	#print(obj.eval(bool_use_stored_model=False)[0])
-	#print(obj.eval(bool_use_stored_model=False)[1])
+	print(obj.eval(bool_use_stored_model=False)[0])
+	print(obj.eval(bool_use_stored_model=False)[1])
 	#print('---')
 	#for node in obj._cur_model.preorder():
 		#print(node)
 	#	node.showAttributes()
-	print('---')
-	print(obj.eval(bool_use_stored_model=False)[0])
-	print(obj.eval(bool_use_stored_model=False)[1])
+	#print(obj.eval(bool_use_stored_model=False)[0])
+	#print(obj.eval(bool_use_stored_model=False)[1])
 	#print(obj.eval(bool_use_stored_model=True)[0])
 	#print(obj.eval(bool_use_stored_model=True)[1])
 	#验证集上评价结果
