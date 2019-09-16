@@ -263,13 +263,6 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			self._validate(node)
 			return self._root is node
 
-		def _preorder(self,node=None):
-			'''从node开始进行前序遍历，若node为None，则从根开始遍历,返回一个迭代器'''
-			if isinstance(node,DecisionTreeClassifierBase.Node):
-				yield node
-				if not self.is_leaf(node):
-					for child in self.children(node):
-						self._preorder(child)	
 		#-----------------------------访问方法-----------------------------
 		def preorder(self,node=None):
 			'''从node开始进行前序遍历，若node为None，则从根开始遍历,返回一个迭代器'''
@@ -281,8 +274,6 @@ class DecisionTreeClassifierBase(ClassifierBase):
 					for child in self.children(node):
 						for nd in self.preorder(child):
 							yield nd
-			#for nd in self._preorder(node):
-			#	yield nd
 
 		def parent(self,node):
 			'''返回给定node的父结点'''
@@ -591,19 +582,19 @@ if __name__ == '__main__':
 	print(obj._reader._xtrain)
 	obj._fixdata()
 	print(obj._reader._xtrain)
-	obj.fit()
+	#obj.fit()
 	#obj.save_model()
 	obj.load_model()
 	#print(obj._cur_model)
-	obj._cur_model._root.showAttributes()
+	#obj._cur_model._root.showAttributes()
 	#print(obj._stored_model)
 	#验证集上预测结果
-	print(obj.eval(bool_use_stored_model=False)[0])
-	print(obj.eval(bool_use_stored_model=False)[1])
-	print('---')
-	for node in obj._cur_model.preorder():
+	#print(obj.eval(bool_use_stored_model=False)[0])
+	#print(obj.eval(bool_use_stored_model=False)[1])
+	#print('---')
+	#for node in obj._cur_model.preorder():
 		#print(node)
-		node.showAttributes()
+	#	node.showAttributes()
 	print('---')
 	#print(obj.eval(bool_use_stored_model=False)[0])
 	#print(obj.eval(bool_use_stored_model=False)[1])
@@ -614,5 +605,5 @@ if __name__ == '__main__':
 	#执行预测
 	#print(obj.predict([[0,0,0,0,0,0]]))
 	#print(obj.predict([[10,10,10,10,10,10]]))
-	#print(obj.predict([[1,1,1,1,1,0]],True))
+	print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
