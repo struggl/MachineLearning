@@ -285,6 +285,13 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			self._validate(node)
 			for v in node._children.values():
 				yield v
+		
+		def sibling(self,node):
+			'''返回给定结点node的兄弟结点的迭代器'''
+			self._validate(node)
+			for v in node._parent._children.values():
+				if v is not node:
+					yield v
 
 		def num_children(self,node):
 			self._validate(node)
@@ -309,13 +316,6 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			T._size += 1
 			T._depth = max(T._depth,child._depth)
 		
-		def delete(self,node):
-			self._validate(node)	
-			#指针修改
-			#T的高度属性
-			#T._size减1
-			self._size -= 1	
-
 	def _majority_class(self,ytrain):
 		freq = {}
 		for lb in ytrain:
@@ -480,13 +480,121 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		self._reader._xtest = np.asarray(self._reader._xtest,dtype='int64')
 		self._reader._xeval = np.asarray(self._reader._xeval,dtype='int64')
 
+	def _loss(self,node):
+		self._cur_model._validate(node)
+		
+
 	def _prune(self,alpha_leaf):
-		'''决策树模型剪枝的实现
+		'''决策树模型后剪枝的实现
+		首先，对于同一个父结点的所有叶结点，是否满足剪枝条件的结论是一致的。记结点nd的兄弟结点为集合sibling
+		而实现过程中比较麻烦的情况：
+		1.某叶结点nd若可以上提叶结点(即令其父结点为叶结点)，则遍历到nd的sibling时，剪枝前叶结点数量len_before
+			变量需要维护，这个问题通过new_leafs的过滤解决了
+		2.若某叶结点nd不满足剪枝条件，当遍历到nd的sibling时，公式上需要考虑已经出队了的nd的损失计算和维护len_before
+			变量为合理值,这个问题通过arrived_leafs的过滤解决了。解决方案中并没有遍历计算nb和sibling的损失，因为
+			遍历到sibling时，肯定不会剪枝，而遍历到其他叶结点时，对于loss_before和loss_after，nb和sibling的损失
+			增量是相等的(无论是对信息熵还是叶结点数量的正则项而言都相等)，因此无需计算
+
 		Args:
 			alpha_leaf:后剪枝对叶结点的正则化超参数,有效取值大于等于0.
 		'''
 		if self._cur_model is None or self._cur_model._root is None or self._cur_model._root._children == {}:
 			raise self.NotTrainedError('无法进行剪枝，因为决策树分类器尚未训练!')
+		if alpha_leaf < 0:
+			raise ValueError('alpha_leaf必须非负!')
+
+		#遍历决策树，把所有的叶结点入队列
+		leafs = collections.deque()
+		for nd in self._cur_model.preorder():
+			if self._cur_model.is_leaf(nd):
+				leafs.add(nd)
+
+		#初始化叶结点数量为原树的叶结点个数
+		len_before = len(leafs)
+		#记录由于剪枝而新产生的叶结点
+		new_leafs = set()
+		#记录while遍历过，但没有进行剪枝的叶结点(同个父结点的叶结点，只需要记录一个就够了)
+		arrived_leafs = set()	
+
+		#除了队列不能为空以外，还需根结点不在叶结点集合中,否则有可能把原树删成空树
+		while len(leafs) != 0 and self._cur_model._root not in leafs:
+			#出队列,记为nd
+			nd = leafs.popleft()
+			#若nd的父结点已经在new_leafs中，则说明nd已经被剪除，直接下一次迭代即可
+			if nd._parent in new_leafs:
+				continue
+			#若nd的兄弟结点在arrived_leafs中，则说明nd也不会达成剪枝条件，直接下一次迭代即可
+			#同时因为没有剪枝，因此sibling方法仍然能正确返回nd的兄弟结点
+			for lf in self._cur_model.sibling(nd):
+				if lf in arrived_leafs:
+					len_before -= 1
+					continue
+		
+			#暂且把nd的父结点设定为叶结点
+			new_leafs.add(nd._parent)
+			#假设剪枝，则剪枝后的叶结点数量为原来的数量减去nd父结点的孩子数量，然后加1
+			len_after = len_before - self._cur_model.num_children(nd._parent) + 1
+			#剪枝前的损失计算初始化：
+			#1.由于nd已经出队，遍历leafs无法到达，因此先加上这部分损失
+			#2.加上arrived_leafs中所有结点及其兄弟结点的损失,这部分结点同样已经出队列，但未剪除，
+			#因此对于loss_before和after_loss而言都要加回来,但要知道二者加的量是一致的，不影响大小
+			#比较，因此可以不加
+			loss_before = 0.0
+			loss_before += self._loss(nd)
+			#剪枝后的损失计算初始化：由于nd._parent尚未入队，遍历leafs无法到达，因此先加上这部分损失
+			loss_after = 0.0
+			loss_after = self._loss(nd._parent)
+			'''被忽略(不影响大小比较)的增量
+			for lf in arrived_leafs:
+				for l in self._cur_model.children(lf._parent):
+					loss_before += self._loss(l)
+					loss_after += self._loss(l)
+			'''
+			'''
+			遍历leafs累计剪枝前后所有叶结点的损失
+			需要明确的一点是，由于存在new_leafs和arrived_leafs的过滤代码，此时leafs中的结点都可以
+			如同刚进入循环一样等同处理
+			'''
+			for leaf in leafs:
+				cur_loss = self._loss(leaf)
+				if leaf._parent is not nd._parent:
+					loss_after += cur_loss
+				loss_before += cur_loss
+			#追加对叶结点数量的惩罚项
+			loss_before += alpha_leaf * len_before
+			loss_after += alpha_leaf * len_after
+			#决定是否剪枝
+			if loss_after < loss_before:
+				'''剪枝的处理：
+				1.把父结点入队；
+				2.父结点_label设置为所拥有样本的众数类；
+				3.清空父结点所有孩子
+				4.维护len_before变量为len_after，模型虽已经上提了叶结点，但是原来叶结点nd的
+					兄弟结点还在队列中，遍历到这些兄弟结点时，由while循环开头利用new_leafs
+					过滤掉即可
+				'''
+				leafs.add(nd._parent)
+				nd._parent._label = sorted(nd._parent._children.values(),
+								key=lambda x:len(x._examples()))[-1]._label
+				nd._parent._children.clear()
+				len_before = len_after
+					
+			else:
+				'''不剪枝的处理：
+				1.将当前结点nd加入arrived_leafs中
+				2.从new_leafs中删除本次while迭代尝试加入的nd._parent
+				3.维护len_before变量，由于队列少了一个不符合剪枝条件的叶结点nd，直接减1即可，
+					然后在while循环开头利用arrived_leafs进行过滤的代码中，每次都再将len_before
+					减去1
+				'''	
+				arrived_leafs.add(nd)
+				new_leafs.remove(nd._parent)
+				len_before -= 1
+				
+			
+
+			
+			
 			
 			
 	#---------------------------------公开方法--------------------------------
