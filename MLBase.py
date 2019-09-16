@@ -532,6 +532,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		'''模型预测的公开接口'''
 		if bool_use_stored_model:
 			use_model = self._stored_model
+			
 		else:
 			use_model = self._cur_model
 		if use_model is None or use_model._root is None or use_model._root._children == {}:
@@ -569,6 +570,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		import pickle
 		with open(cur_path,'wb') as f:
 			pickle.dump(self._cur_model,f)
+		print('save_model done!')
 	
 	def load_model(self,path=None):
 		'''载入模型'''
@@ -579,6 +581,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		import pickle
 		with open(cur_path,'rb') as f:
 			self._stored_model = pickle.load(f)
+		print('load_model done!')
 
 
 
@@ -590,29 +593,24 @@ if __name__ == '__main__':
 	print(obj._reader._xtrain)
 	obj.fit()
 	#obj.save_model()
-	#obj.load_model()
+	obj.load_model()
 	#print(obj._cur_model)
-	#obj._cur_model.showAttributes()
+	obj._cur_model._root.showAttributes()
 	#print(obj._stored_model)
 	#验证集上预测结果
 	print(obj.eval(bool_use_stored_model=False)[0])
 	print(obj.eval(bool_use_stored_model=False)[1])
-	#print(type(obj._cur_model))
-	#print(type(obj._cur_model._root))
-	#print(type(obj._cur_model.preorder(obj._cur_model._root)))
-	#print(obj._cur_model._root._children[0]._children)
-	#print(obj._cur_model._root._children=={})
-	for nd in (obj._cur_model.children(obj._cur_model._root)):
-		print(nd)
 	print('---')
 	for node in obj._cur_model.preorder():
-		#print(node._children[0]._children)
-		print(node)
+		#print(node)
+		node.showAttributes()
+	print('---')
+	#print(obj.eval(bool_use_stored_model=False)[0])
+	#print(obj.eval(bool_use_stored_model=False)[1])
 	#print(obj.eval(bool_use_stored_model=True)[0])
 	#print(obj.eval(bool_use_stored_model=True)[1])
-	#print(obj.eval(bool_use_stored_model=True)[0])
 	#验证集上评价结果
-	#print(obj.eval(True,method='f1-score')[1])
+	print(obj.eval(bool_use_stored_model=True,method='f1-score')[1])
 	#执行预测
 	#print(obj.predict([[0,0,0,0,0,0]]))
 	#print(obj.predict([[10,10,10,10,10,10]]))
