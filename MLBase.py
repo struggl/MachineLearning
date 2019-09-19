@@ -216,7 +216,8 @@ class DecisionTreeClassifierBase(ClassifierBase):
 	'''决策树分类器基类'''
 	class Node(object):
 		'''决策树的结点类'''
-		def __init__(self,feature=None,label=None,examples=None,parent=None,depth=None):
+		def __init__(self,feature=None,label=None,examples=None,parent=None,
+				depth=None,parent_split_feat_val=None):
 			'''
 			Args:
 				feature:存储当前结点的划分属性
@@ -224,6 +225,8 @@ class DecisionTreeClassifierBase(ClassifierBase):
 				examples:每个结点存储了自己拥有的样本的序号(可迭代对象)
 				parent父结点，根结点设置为None
 				depth:结点的深度
+				parent_split_feature_val:父结点划分属性对应本结点的取值
+				
 			'''
 			self._feature = feature
 			self._children = collections.OrderedDict()
@@ -232,21 +235,22 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			self._examples = examples
 			self._parent = parent	
 			self._depth = depth
+			self._parent_split_feature_val = None
 	
 		def showAttributes(self):
-			print('_feature:'+repr(self._feature))
+			print('_depth:'+repr(self._depth))
+			print('父结点划分特征取值_parent_split_feature_val:'+repr(self._parent_split_feature_val))
+			print('当前划分属性_feature:'+repr(self._feature))
 			print('_children:'+repr(self._children))
 			print('_label:'+repr(self._label))
 			print('_examples:'+repr(self._examples))
 			print('_parent:'+repr(self._parent))
-			print('_depth:'+repr(self._depth))
 	
 	class DecisionTree(object):
 		'''决策树数据结构'''
 		def __init__(self):
 			self._size = 0
 			self._root = None
-			self._depth = None
 
 		def __len__(self):
 			return self._size
@@ -264,7 +268,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			return self._root is node
 
 		#-----------------------------访问方法-----------------------------
-		def preorder(self,node=None):
+		def preOrder(self,node=None):
 			'''从node开始进行前序遍历，若node为None，则从根开始遍历,返回一个迭代器'''
 			if node is None:
 				node = self._root
@@ -272,7 +276,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 				yield node
 				if not self.is_leaf(node):
 					for child in self.children(node):
-						for nd in self.preorder(child):
+						for nd in self.preOrder(child):
 							yield nd
 
 		def parent(self,node):
@@ -295,26 +299,25 @@ class DecisionTreeClassifierBase(ClassifierBase):
 
 		def num_children(self,node):
 			self._validate(node)
-			if self.is_leaf(node):
+			if self.is_leaf(node) or node._children is None:
 				return 0
 			else:
 				return len(node._children)
 			
  
 		#-----------------------------更新方法------------------------------				
-		def add_root(self,feature=None,label=None,examples=None,parent=None,depth=None):
-			T._root = Node(feature=feature,label=label,examples=examples,parent=parent,depth=0)
-			T._depth = 0
-			T._size = 1
+		def add_root(self,node):
+			'''为决策树添加根结点，根结点深度设定为1'''
+			self._root = node
+			node._depth = 1
+			self._size = 1
 
-		def add_children(self,parent_node,key,feature=None,label=None,examples=None,parent=None,depth=None):
-			'''根据key为parent_node添加孩子child'''
-			self._validate(parent_node)
-			child = Node(feature=feature,label=label,examples=examples,parent=parent,depth=parent_node._depth+1)
-			parent_node._children[key] = child
-			child._parent = parent_node
-			T._size += 1
-			T._depth = max(T._depth,child._depth)
+		#def add_root(self,empty_tree=None,feature=None,label=None,examples=None,parent=None,
+		#		depth=None,parent_split_feature_val=None):
+		#	'''为决策树添加根结点，根结点深度设定为1'''
+		#	empty_tree._root = DecisionTreeClassifierBase.Node(feature=feature,label=label,examples=examples,
+		#							parent=None,depth=1,parent_split_feature_val=None)
+		#	empty_tree._size = 1
 
 	def bool_not_trained(self,tree=None):
 		'''判断决策树是否已经训练,仅判断根结点，默认在_fit和_prune方法的更新过程中其余结点维护了相应的特性'''
@@ -439,15 +442,16 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		self._assert_ydata(ytrain)
 		xdata = []
 		ydata = []
-		examples = set()
+		#examples = set()
 		for i in range(len(xtrain)):
 			if xtrain[i][feat] == val:
-				examples.add(i)
+				#examples.add(i)
 				xdata.append(np.concatenate([xtrain[i][:feat],xtrain[i][feat+1:]]))
 				ydata.append(ytrain[i])
 		xdata,ydata = np.asarray(xdata,dtype=xtrain.dtype),np.asarray(ydata,dtype=ytrain.dtype)
 		if bool_return_examples:
-			return xdata,ydata,examples
+			#return xdata,ydata,examples
+			return xdata,ydata,(xdata,ydata)
 		else:
 			return xdata,ydata
 
@@ -474,37 +478,69 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			return bestFeat
 		return None	
 
-	def _fit(self,xtrain,ytrain,examples,depth,max_depth=None):
+	def _fit(self,xtrain,ytrain,examples,depth,global_labels,max_depth):
 		'''训练决策树分类器
+		global_labels:python list.指定xtrain每一列对应的标签名称，一般而言使用list(range(len(xtrain[0])))即可
 		'''
+		if max_depth != None and depth > max_depth:	#递归返回情况1:树的深度达到最大设定时终止,返回None
+			return
+
 		freq = 0
 		for lb in ytrain:
 			if lb == ytrain[0]:
 				freq += 1
-		if freq == len(ytrain):	#递归返回情况1：所有类别相同
-			return self.Node(label=ytrain[0],
-					examples=examples,
-					depth=depth+1)
-
-		bestFeat = self._chooseBestFeatureToSplit(xtrain,ytrain)	#选择最优划分特征
-		if bestFeat is None:	#递归返回情况2：无法继续切分特征时，返回众数类
-			return self.Node(label=self._majority_class(ytrain),
-					examples=examples,
-					depth=depth+1)
+		if freq == len(ytrain):	#递归返回情况2：所有类别相同,返回叶结点
+			cur_node = self.Node(label=ytrain[0],
+						examples=examples,
+						depth=depth)
+			if self._cur_model._root is None:
+				self._cur_model.add_root(cur_node)
+			return	cur_node
+			#return self.Node(label=ytrain[0],
+			#		examples=examples,
+			#		depth=depth)
+		
+		#选择最优划分特征
+		bestFeat = self._chooseBestFeatureToSplit(xtrain,ytrain)
+		if bestFeat is None:	#递归返回情况3：无法继续切分特征时，返回叶结点
+			cur_node = self.Node(label=self._majority_class(ytrain),
+						examples=examples,
+						depth=depth)
+			if self._cur_model._root is None:
+				self._cur_model.add_root(cur_node)
+			return	cur_node
+			#return self.Node(label=self._majority_class(ytrain),
+			#		examples=examples,
+			#		depth=depth)
 		
 		bestFeatVals = set([example[bestFeat] for example in xtrain])
 		
-		resNode = self.Node(feature=bestFeat,examples=examples,depth=depth+1)
-	
-		for val in bestFeatVals:	#对最优特征的每个值构建子树	
-			#_splitDataSet方法需要新增一个返回，记录xtrain中bestFea等于val的那些行
-			cur_xtrain,cur_ytrain,cur_examples = self._splitDataSet(xtrain,ytrain,bestFeat,val)
-			newChild = self._fit(xtrain=cur_xtrain,
-						ytrain=cur_ytrain,
-						examples=cur_examples,
-						depth=resNode._depth+1)
-			resNode._children[val] = newChild
-			newChild._parent = resNode
+		resNode = self.Node(feature=global_labels[bestFeat],examples=examples,depth=depth)
+		del global_labels[bestFeat]
+		if self._cur_model._root is None:
+			self._cur_model.add_root(resNode)
+		else:
+			self._cur_model._size += 1
+		
+		#仅当当前结点深度depth小于限定深度max_depth时才分裂当前结点
+		if max_depth is None or depth < max_depth:
+			#若分裂结点，则尝试对最优特征的每个值构建子树
+			for val in bestFeatVals:
+				cur_xtrain,cur_ytrain,cur_examples = self._splitDataSet(xtrain,ytrain,bestFeat,val)
+				newChild = self._fit(xtrain=cur_xtrain,
+							ytrain=cur_ytrain,
+							examples=cur_examples,
+							global_labels=global_labels,
+							depth=resNode._depth+1,
+							max_depth=max_depth)
+				newChild._parent_split_feature_val = (resNode._feature,val)
+				resNode._children[val] = newChild
+				newChild._parent = resNode
+				self._cur_model._size += 1
+		#若当前结点未分裂(深度到达限制),需要设定当前结点为叶结点
+		if self._cur_model.num_children(resNode) == 0:
+			resNode._feature = None
+			resNode._label = self._majority_class(ytrain)	
 		return resNode	
 
 	def _fixdata(self):
@@ -515,15 +551,16 @@ class ID3Classifier(DecisionTreeClassifierBase):
 	def _get_examples(self,node):
 		'''获取node存放的样本'''
 		self._cur_model._validate(node)
-		n = len(node._examples)
-		xdata = [None] * n
-		ydata = [None] * n
-		i = 0
-		for idx in node._examples:
-			xdata[i] = self._reader._xtrain[idx]
-			ydata[i] = self._reader._ytrain[idx]
-			i += 1
-		return np.asarray(xdata),np.asarray(ydata)
+		#n = len(node._examples)
+		#xdata = [None] * n
+		#ydata = [None] * n
+		#i = 0
+		#for idx in node._examples:
+		#	xdata[i] = self._reader._xtrain[idx]
+		#	ydata[i] = self._reader._ytrain[idx]
+		#	i += 1
+		#return np.asarray(xdata),np.asarray(ydata)
+		return node._examples
 	
 	def _loss(self,node):
 		xdata,ydata = self._get_examples(node)
@@ -560,7 +597,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 
 		#遍历决策树，把所有的叶结点入队列
 		leafs = collections.deque()
-		for nd in self._cur_model.preorder():
+		for nd in self._cur_model.preOrder():
 			if self._cur_model.is_leaf(nd):
 				leafs.append(nd)
 
@@ -632,10 +669,10 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				if self._cur_model.is_root(nd._parent):
 					_,ydata = self._get_examples(nd._parent)
 					nd._parent._label = self._majority_class(ydata) 
-				if self._cur_model.is_root(nd._parent):
-					print('++++++++')
-					nd._parent.showAttributes()
-					print('++++++++')
+				#if self._cur_model.is_root(nd._parent):
+				#	print('++++++++')
+				#	nd._parent.showAttributes()
+				#	print('++++++++')
 				nd._parent._children.clear()
 				len_before = len_after
 					
@@ -650,21 +687,26 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				arrived_leafs.add(nd)
 				new_leafs.remove(nd._parent)
 				len_before -= 1
-				
-			
-
-			
-			
-			
-			
+	
 	#---------------------------------公开方法--------------------------------
+	def print_tree(self):
+		'''层序遍历输出决策树结点及结点关键信息'''
+		Q = collections.deque()
+		Q.append(self._cur_model._root)
+		while len(Q) != 0:
+			node = Q.popleft()
+			node.showAttributes()
+			print('---\n')
+			for child in node._children.values():
+				Q.append(child)
+
 	def fit(self,xtrain=None,
 			ytrain=None,
 			examples=None,
 			depth=None,
 			max_depth=None,
 			alpha_leaf=0,
-			bool_prune=True):
+			bool_prune=False):
 		"""模型拟合的公开接口。若训练数据集未直接提供，则使用self._reader读取训练数据集
 		Args:
 			alpha_leaf:后剪枝对叶结点的正则化超参数,有效取值大于等于0.
@@ -672,20 +714,32 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		if xtrain is None or ytrain is None:
 			self._fixdata()
 			self._cur_model = self.DecisionTree()
-			self._cur_model._root = self._fit(xtrain=self._reader._xtrain,
-								ytrain=self._reader._ytrain,
-								examples=range(len(self._reader._xtrain)),
-								depth=-1)
+			self._fit(xtrain=self._reader._xtrain,
+					ytrain=self._reader._ytrain,
+					examples=(self._reader._xtrain,self._reader._ytrain),
+					global_labels=list(range(len(self._reader._xtrain[0]))),
+					depth=1,
+					max_depth=max_depth)
+			#self._cur_model._root = self._fit(xtrain=self._reader._xtrain,
+			#					ytrain=self._reader._ytrain,
+			#					examples=range(len(self._reader._xtrain)),
+			#					depth=0)
 		else:
 			xtrain = np.asarray(xtrain)
 			ytrain = np.asarray(ytrain)
 			self._assert_xdata(xtrain)
 			self._assert_ydata(ytrain)
 			self._cur_model = self.DecisionTree()
-			self._cur_model._root = self._fit(xtrain=xtrain,
-								ytrain=ytrain,
-								examples=range(len(self._reader._xtrain)),
-								depth=-1)
+			self._fit(xtrain=self._reader._xtrain,
+					ytrain=self._reader._ytrain,
+					examples=(self._reader._xtrain,self._reader._ytrain),
+					global_labels=list(range(len(self._reader._xtrain[0]))),
+					depth=1,
+					max_depth=max_depth)
+			#self._cur_model._root = self._fit(xtrain=xtrain,
+			#					ytrain=ytrain,
+			#					examples=range(len(self._reader._xtrain)),
+			#					depth=-1)
 		if bool_prune:
 			self._prune(alpha_leaf=alpha_leaf)	
 				
@@ -761,7 +815,8 @@ if __name__ == '__main__':
 	#print(obj._reader._xtrain)
 	#obj._fixdata()
 	#print(obj._reader._xtrain)
-	obj.fit(alpha_leaf=0.01)
+	#obj.fit(alpha_leaf=0.55,bool_prune=True)
+	#obj.print_tree()
 	#obj.save_model()
 	#obj.load_model()
 	#print('*************')
@@ -770,10 +825,10 @@ if __name__ == '__main__':
 	#obj._cur_model._root.showAttributes()
 	#print(obj._stored_model)
 	#验证集上预测结果
-	print(obj.eval(bool_use_stored_model=False)[0])
-	print(obj.eval(bool_use_stored_model=False)[1])
+	#print(obj.eval(bool_use_stored_model=False)[0])
+	#print(obj.eval(bool_use_stored_model=False)[1])
 	#print('---')
-	#for node in obj._cur_model.preorder():
+	#for node in obj._cur_model.preOrder():
 		#print(node)
 	#	node.showAttributes()
 	#print(obj.eval(bool_use_stored_model=False)[0])
@@ -787,3 +842,8 @@ if __name__ == '__main__':
 	#print(obj.predict([[10,10,10,10,10,10]]))
 	#print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
+	obj.fit(alpha_leaf=0,max_depth=3,bool_prune=False)
+	obj.print_tree()
+	print(obj.eval(bool_use_stored_model=False)[0])
+	print(obj.eval(bool_use_stored_model=False)[1])
+	print(obj._cur_model._size)
