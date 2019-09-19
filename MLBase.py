@@ -658,6 +658,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			#决定是否剪枝
 			if loss_after < loss_before:
 				'''剪枝的处理：
+				0.更新决策树_size属性为原来_size减去新叶结点原来的孩子数量
 				1.把父结点入队；
 				2.父结点_label设置为所拥有样本的众数类；
 				3.清空父结点所有孩子
@@ -665,10 +666,13 @@ class ID3Classifier(DecisionTreeClassifierBase):
 					兄弟结点还在队列中，遍历到这些兄弟结点时，由while循环开头利用new_leafs
 					过滤掉即可
 				'''
+				self._cur_model._size = self._cur_model._size - len(nd._parent._children)
 				leafs.append(nd._parent)
-				if self._cur_model.is_root(nd._parent):
-					_,ydata = self._get_examples(nd._parent)
-					nd._parent._label = self._majority_class(ydata) 
+				#if self._cur_model.is_root(nd._parent):
+				#	_,ydata = self._get_examples(nd._parent)
+				#	nd._parent._label = self._majority_class(ydata) 
+				_,ydata = self._get_examples(nd._parent)
+				nd._parent._label = self._majority_class(ydata) 
 				#if self._cur_model.is_root(nd._parent):
 				#	print('++++++++')
 				#	nd._parent.showAttributes()
@@ -687,6 +691,9 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				arrived_leafs.add(nd)
 				new_leafs.remove(nd._parent)
 				len_before -= 1
+
+		if self._cur_model._root in leafs:
+			self._cur_model._size = 1
 	
 	#---------------------------------公开方法--------------------------------
 	def print_tree(self):
@@ -773,9 +780,9 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				raise self.PredictionError('待预测样本 {} 某个属性出现了新的取值!'.format(repr(cur_xtest[i])))
 			if node._label is None:
 				print('++++')
-				node.showAttributes()
-				print('++++')
-				raise self.PredictionError('叶结点_label属性取值为None!')
+				#node.showAttributes()
+				#print('++++')
+				#raise self.PredictionError('叶结点_label属性取值为None!')
 			preds[i] = node._label	
 		return np.asarray(preds)
 
@@ -842,7 +849,8 @@ if __name__ == '__main__':
 	#print(obj.predict([[10,10,10,10,10,10]]))
 	#print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
-	obj.fit(alpha_leaf=0,max_depth=3,bool_prune=False)
+	#obj.fit(alpha_leaf=0,max_depth=3,bool_prune=True)
+	obj.fit(alpha_leaf=6,bool_prune=True)
 	obj.print_tree()
 	print(obj.eval(bool_use_stored_model=False)[0])
 	print(obj.eval(bool_use_stored_model=False)[1])
