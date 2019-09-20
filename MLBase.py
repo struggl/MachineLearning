@@ -216,6 +216,8 @@ class DecisionTreeClassifierBase(ClassifierBase):
 	'''决策树分类器基类'''
 	class Node(object):
 		'''决策树的结点类'''
+		__slots__ = '_feature','_children','_label','_examples','_parent',\
+				'_depth','_parent_split_feature_val','_loss'
 		def __init__(self,feature=None,label=None,examples=None,parent=None,
 				depth=None,parent_split_feat_val=None):
 			'''
@@ -236,15 +238,18 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			self._parent = parent	
 			self._depth = depth
 			self._parent_split_feature_val = None
+			#存储当前最优分裂结点对应的损失值(典型损失函数为信息增益、信息增益比、基尼指数)
+			self._loss = None
 	
 		def showAttributes(self):
 			print('_depth:'+repr(self._depth))
 			print('父结点划分特征取值_parent_split_feature_val:'+repr(self._parent_split_feature_val))
 			print('当前划分属性_feature:'+repr(self._feature))
-			print('_children:'+repr(self._children))
+			print('当前划分属性_loss:'+repr(self._loss))
+			#print('_children:'+repr(self._children))
 			print('_label:'+repr(self._label))
-			print('_examples:'+repr(self._examples))
-			print('_parent:'+repr(self._parent))
+			#print('_examples:'+repr(self._examples))
+			#print('_parent:'+repr(self._parent))
 	
 	class DecisionTree(object):
 		'''决策树数据结构'''
@@ -311,13 +316,6 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			self._root = node
 			node._depth = 1
 			self._size = 1
-
-		#def add_root(self,empty_tree=None,feature=None,label=None,examples=None,parent=None,
-		#		depth=None,parent_split_feature_val=None):
-		#	'''为决策树添加根结点，根结点深度设定为1'''
-		#	empty_tree._root = DecisionTreeClassifierBase.Node(feature=feature,label=label,examples=examples,
-		#							parent=None,depth=1,parent_split_feature_val=None)
-		#	empty_tree._size = 1
 
 	def bool_not_trained(self,tree=None):
 		'''判断决策树是否已经训练,仅判断根结点，默认在_fit和_prune方法的更新过程中其余结点维护了相应的特性'''
@@ -406,13 +404,31 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		InformationGain = baseInformationEntropy - newInformationEntropy
 		return InformationGain	
 												
-	def _calInformaitonGainRatio(self,xdata,ydata,feat):
+	def _calInformationGainRatio(self,xdata,ydata,feat):
 		'''给定数据集D和属性feat，计算属性feat的信息增益率'''
 		xdata = np.asarray(xdata)
 		ydata = np.asarray(ydata)
 		self._assert_xdata(xdata)
 		self._assert_ydata(ydata)
 		pass
+		entropy_feat = 0.0
+		featValSet = dict()
+		
+		feat_column = [example[feat] for example in xdata]
+		for val in feat_column:
+			featValSet[val] = featValSet.get(val,0) + 1 
+		nexample = float(len(xdata))
+
+		from math import log
+		for v in featValSet.values():
+			p_v = v / nexample
+			entropy_feat += p_v * log(p_v,2)
+		entropy_feat *= -1
+		
+		informationGain = self._calInformationGain(xdata,ydata,feat)
+		return float(informationGain) / entropy_feat
+			
+		
 
 	def _calGiniIndex(self,xdata,ydata,feat):
 		'''给定数据集D和属性feat，计算属性feat的基尼指数'''
@@ -456,27 +472,29 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			return xdata,ydata
 
 	
+
 class ID3Classifier(DecisionTreeClassifierBase):
 	'''ID3决策树分类器'''	
 	def __init__(self,dataDir,reader=None):
 		super().__init__(dataDir,reader)
 	
-	def _chooseBestFeatureToSplit(self,xtrain,ytrain):
-		'''使用信息熵选择最优划分特征,若数据集特征数不大于1或最优划分的信息增益不为正，则返回None
+	def _chooseBestFeatureToSplit(self,xtrain,ytrain,epsion=0):
+		'''使用信息熵选择最优划分特征,若数据集特征数不大于0或最优划分的信息增益大于阈值epsion，则返回None
+		Args:
+			epsion:每次结点划分时损失函数下降的阈值，默认为0
 		'''
 		numFeat = len(xtrain[0])
-		if numFeat <= 1:
+		if numFeat < 1:
 			return None
-		bestGain = 0.0
+		bestGain = epsion
 		bestFeat = None
 		for feat in range(numFeat):
 			curGain = self._calInformationGain(xtrain,ytrain,feat)
 			if curGain > bestGain:
 				bestGain = curGain
 				bestFeat = feat
-		if bestFeat != None and bestGain > 0:
-			return bestFeat
-		return None	
+		if bestFeat != None and bestGain > epsion:
+			return bestFeat,bestGain
 
 	def _fit(self,xtrain,ytrain,examples,depth,global_labels,max_depth):
 		'''训练决策树分类器
@@ -501,8 +519,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			#		depth=depth)
 		
 		#选择最优划分特征
-		bestFeat = self._chooseBestFeatureToSplit(xtrain,ytrain)
-		if bestFeat is None:	#递归返回情况3：无法继续切分特征时，返回叶结点
+		res = self._chooseBestFeatureToSplit(xtrain,ytrain)
+		if res is None:	#递归返回情况3：无法继续切分特征时，返回叶结点
 			cur_node = self.Node(label=self._majority_class(ytrain),
 						examples=examples,
 						depth=depth)
@@ -512,7 +530,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			#return self.Node(label=self._majority_class(ytrain),
 			#		examples=examples,
 			#		depth=depth)
-		
+		bestFeat,loss = res	
 		bestFeatVals = set([example[bestFeat] for example in xtrain])
 		
 		resNode = self.Node(feature=global_labels[bestFeat],examples=examples,depth=depth)
@@ -541,6 +559,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		if self._cur_model.num_children(resNode) == 0:
 			resNode._feature = None
 			resNode._label = self._majority_class(ytrain)	
+		resNode._loss = loss
 		return resNode	
 
 	def _fixdata(self):
@@ -777,7 +796,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				while node._label is None and node._children != {}:
 					node = node._children[cur_xtest[i][node._feature]]
 			except KeyError:
-				raise self.PredictionError('待预测样本 {} 某个属性出现了新的取值!'.format(repr(cur_xtest[i])))
+				raise self.PredictionError('待预测样本 {} 某个属性出现了新的取值!'.format\
+					(repr(cur_xtest[i])))
 			if node._label is None:
 				print('++++')
 				#node.showAttributes()
@@ -815,10 +835,32 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		print('load_model done!')
 
 
-
+class C45Classifier(ID3Classifier):
+	'''C4.5决策树分类器，与ID3决策树实现的区别在于：
+	1._chooseBestFeatureToSplit方法中不使用信息增益_calInformationGain而是信息增益比_calInformationGainRatio
+	'''
+	def _chooseBestFeatureToSplit(self,xtrain,ytrain,epsion=0):
+		'''使用信息增益比选择最优划分特征,若数据集特征数不大于0或最优划分的信息增益比大于阈值epsion，则返回None
+		Args:
+			epsion:每次结点划分时损失函数下降的阈值，默认为0
+		'''
+		numFeat = len(xtrain[0])
+		if numFeat < 1:
+			return None
+		bestGainRatio = epsion
+		bestFeat = None
+		for feat in range(numFeat):
+			curGainRatio = self._calInformationGainRatio(xtrain,ytrain,feat)
+			if curGainRatio > bestGainRatio:
+				bestGainRatio = curGainRatio
+				bestFeat = feat
+		if bestFeat != None and bestGainRatio > epsion:
+			return bestFeat,bestGainRatio
+	
 
 if __name__ == '__main__':
 	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
+	#obj = C45Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
 	#print(obj._reader._xtrain)
 	#obj._fixdata()
 	#print(obj._reader._xtrain)
@@ -850,7 +892,7 @@ if __name__ == '__main__':
 	#print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
 	#obj.fit(alpha_leaf=0,max_depth=3,bool_prune=True)
-	obj.fit(alpha_leaf=6,bool_prune=True)
+	obj.fit(alpha_leaf=0,bool_prune=False)
 	obj.print_tree()
 	print(obj.eval(bool_use_stored_model=False)[0])
 	print(obj.eval(bool_use_stored_model=False)[1])
