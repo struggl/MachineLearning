@@ -239,33 +239,31 @@ class DecisionTreeClassifierBase(ClassifierBase):
 			freq[lb] = freq.get(lb,0) + 1	
 		return sorted(freq.items(),key=lambda x:x[1],reverse=True)[0][0]
 
-	def _calInformationEntropy(self,xdata,ydata):
+	def _calInformationEntropy(self,ydata):
 		'''给定数据集D，计算数据集D的信息熵,信息熵取值越小越好.令K为类别数量，
 		Ent(D) = - sum_{k=1}^K p_k*log(p_k,2),其中p_k为第k类在数据集中出现的频率
 		'''
-		xdata = self._assert_xdata(xdata)
 		ydata = self._assert_ydata(ydata)
 		from math import log
 		totalEnt = 0.0
 		lbFreq = {}
 		for lb in ydata:
 			lbFreq[lb] = lbFreq.get(lb,0) + 1
-		nexample = len(xdata)	
+		nexample = len(ydata)	
 		for k in lbFreq.keys():
 			p_k = float(lbFreq[k]) / nexample
 			totalEnt -= p_k * log(p_k,2) 
 		return totalEnt
 			
-	def _calGini(self,xdata,ydata):
+	def _calGini(self,ydata):
 		'''给定数据集D，计算数据集D的基尼指数，基尼指数取值越小越好。令K为类别数量，
 		Gini(D) = 1 - sum_{k=1}^K p_k^2,其中p_k为第k类在数据集中出现的频率
 		'''	
-		xdata = self._assert_xdata(xdata)
 		ydata = self._assert_ydata(ydata)
 		lbFreq = {}
 		for lb in ydata:
 			lbFreq[lb] = lbFreq.get(lb,0) + 1
-		nexample = len(xdata)	
+		nexample = len(ydata)	
 		Gini = 0
 		for k in lbFreq.keys():
 			p_k = float(lbFreq[k]) / nexample
@@ -280,14 +278,14 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		'''
 		xdata = self._assert_xdata(xdata)
 		ydata = self._assert_ydata(ydata)
-		baseInformationEntropy = self._calInformationEntropy(xdata,ydata)
+		baseInformationEntropy = self._calInformationEntropy(ydata)
 		featValSet = set([example[feat] for example in xdata])
 		nexample = float(len(xdata))
 		newInformationEntropy = 0.0
 		for val in featValSet:
-			cur_xdata,cur_ydata = self._splitDataSet(xdata,ydata,feat,val,False)
-			p_v = len(cur_xdata) / nexample
-			newInformationEntropy += p_v * self._calInformationEntropy(cur_xdata,cur_ydata)
+			_,cur_ydata = self._splitDataSet(xdata,ydata,feat,val)
+			p_v = len(cur_ydata) / nexample
+			newInformationEntropy += p_v * self._calInformationEntropy(cur_ydata)
 		InformationGain = baseInformationEntropy - newInformationEntropy
 		return InformationGain	
 												
@@ -295,7 +293,6 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		'''给定数据集D和属性feat，计算属性feat的信息增益率'''
 		xdata = self._assert_xdata(xdata)
 		ydata = self._assert_ydata(ydata)
-		pass
 		entropy_feat = 0.0
 		featValSet = dict()
 		
@@ -307,8 +304,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		from math import log
 		for v in featValSet.values():
 			p_v = v / nexample
-			entropy_feat += p_v * log(p_v,2)
-		entropy_feat *= -1
+			entropy_feat -= p_v * log(p_v,2)
 		
 		informationGain = self._calInformationGain(xdata,ydata,feat)
 		return float(informationGain) / entropy_feat
