@@ -19,39 +19,24 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			return True
 		return False	
 
-	def _splitDataSet(self,xtrain,ytrain,feat,val,
-				bool_return_examples=True,
-				bool_contain_feat_column=False):
+	def _splitDataSet(self,xtrain,ytrain,feat,val):
 		'''获取子数据集feat列上取值为val的子数据集
 		Args:
 			xtrain:np.ndarray,二维特征向量
 			ytrain:np.ndarray,维度是一。
 			feat:python int.指定列索引
 			val:python int.指定feat列的取值
-			bool_return_examples:bool.若为True,返回xtrain的feat列上取值为val的那些样本索引的可迭代对象(且支持__len__)
-			bool_contain_feat_column:bool.若为True,则采用CART决策树的二元划分策略，子数据集仍然包含feat这一列;
-				否则子数据集不保留feat所在列。
 		'''
-		if bool_contain_feat_column:
-			raise NotImplementedError
-		xtrain = np.asarray(xtrain)
-		ytrain = np.asarray(ytrain)
-		self._assert_xdata(xtrain)
-		self._assert_ydata(ytrain)
+		xtrain = self._assert_xdata(xtrain)
+		ytrain = self._assert_ydata(ytrain)
 		xdata = []
 		ydata = []
-		#examples = set()
 		for i in range(len(xtrain)):
 			if xtrain[i][feat] == val:
-				#examples.add(i)
 				xdata.append(np.concatenate([xtrain[i][:feat],xtrain[i][feat+1:]]))
 				ydata.append(ytrain[i])
 		xdata,ydata = np.asarray(xdata,dtype=xtrain.dtype),np.asarray(ydata,dtype=ytrain.dtype)
-		if bool_return_examples:
-			#return xdata,ydata,examples
-			return xdata,ydata,(xdata,ydata)
-		else:
-			return xdata,ydata
+		return xdata,ydata
 	
 	def _chooseBestFeatureToSplit(self,xtrain,ytrain,epsion=0):
 		'''使用信息熵选择最优划分特征,若数据集特征数不大于0或最优划分的信息增益大于阈值epsion，则返回None
@@ -89,9 +74,6 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			if self._cur_model._root is None:
 				self._cur_model.add_root(cur_node)
 			return	cur_node
-			#return self.Node(label=ytrain[0],
-			#		examples=examples,
-			#		depth=depth)
 		
 		#选择最优划分特征
 		res = self._chooseBestFeatureToSplit(xtrain,ytrain)
@@ -102,9 +84,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			if self._cur_model._root is None:
 				self._cur_model.add_root(cur_node)
 			return	cur_node
-			#return self.Node(label=self._majority_class(ytrain),
-			#		examples=examples,
-			#		depth=depth)
+
 		bestFeat,loss = res	
 		bestFeatVals = set([example[bestFeat] for example in xtrain])
 		
@@ -119,9 +99,9 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		if max_depth is None or depth < max_depth:
 			#若分裂结点，则尝试对最优特征的每个值构建子树
 			for val in bestFeatVals:
-				cur_xtrain,cur_ytrain,cur_examples = self._splitDataSet(xtrain,ytrain,bestFeat,val)
-				newChild = self._fit(xtrain=cur_xtrain,
-							ytrain=cur_ytrain,
+				cur_examples = self._splitDataSet(xtrain,ytrain,bestFeat,val)
+				newChild = self._fit(xtrain=cur_examples[0],
+							ytrain=cur_examples[1],
 							examples=cur_examples,
 							global_labels=global_labels,
 							depth=resNode._depth+1,
@@ -149,8 +129,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 	
 	def _loss(self,node):
 		'''后剪枝时计算叶结点的损失(不包含惩罚项)'''
-		xdata,ydata = self._get_examples(node)
-		return self._calInformationEntropy(xdata,ydata)
+		_,ydata = self._get_examples(node)
+		return self._calInformationEntropy(ydata)
 
 	def _prune(self,alpha_leaf):
 		'''决策树模型后剪枝的实现
@@ -244,15 +224,8 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				'''
 				self._cur_model._size = self._cur_model._size - len(nd._parent._children)
 				leafs.append(nd._parent)
-				#if self._cur_model.is_root(nd._parent):
-				#	_,ydata = self._get_examples(nd._parent)
-				#	nd._parent._label = self._majority_class(ydata) 
 				_,ydata = self._get_examples(nd._parent)
 				nd._parent._label = self._majority_class(ydata) 
-				#if self._cur_model.is_root(nd._parent):
-				#	print('++++++++')
-				#	nd._parent.showAttributes()
-				#	print('++++++++')
 				nd._parent._children.clear()
 				len_before = len_after
 					
@@ -303,10 +276,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 					global_labels=list(range(len(self._reader._xtrain[0]))),
 					depth=1,
 					max_depth=max_depth)
-			#self._cur_model._root = self._fit(xtrain=self._reader._xtrain,
-			#					ytrain=self._reader._ytrain,
-			#					examples=range(len(self._reader._xtrain)),
-			#					depth=0)
+
 		else:
 			xtrain = self._assert_xdata(xtrain)
 			ytrain = self._assert_ydata(ytrain)
@@ -317,10 +287,6 @@ class ID3Classifier(DecisionTreeClassifierBase):
 					global_labels=list(range(len(self._reader._xtrain[0]))),
 					depth=1,
 					max_depth=max_depth)
-			#self._cur_model._root = self._fit(xtrain=xtrain,
-			#					ytrain=ytrain,
-			#					examples=range(len(self._reader._xtrain)),
-			#					depth=-1)
 		if bool_prune:
 			self._prune(alpha_leaf=alpha_leaf)	
 				
@@ -352,11 +318,6 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			except KeyError:
 				raise self.PredictionError('待预测样本 {} 某个属性出现了新的取值!'.format\
 					(repr(cur_xtest[i])))
-			if node._label is None:
-				print('++++')
-				#node.showAttributes()
-				#print('++++')
-				#raise self.PredictionError('叶结点_label属性取值为None!')
 			preds[i] = node._label	
 		return np.asarray(preds)
 
@@ -397,10 +358,10 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			'''
 			Args:
 				feature:存储当前结点的划分属性
-				label:若为叶结点，则_label属性存储了该叶结点的标签
-				examples:每个结点存储了自己拥有的样本的序号(可迭代对象)
+				label:若为叶结点，则_label属性存储了该叶结点的标签,否则为None
+				examples:tuple.每个结点存储了自己拥有的xtrain与ytrain
 				parent父结点，根结点设置为None
-				depth:结点的深度
+				depth:结点的深度,根结点设置深度为1
 				parent_split_feature_val:父结点划分属性对应本结点的取值
 				
 			'''
