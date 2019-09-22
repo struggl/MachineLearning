@@ -8,8 +8,32 @@ class C45Classifier(DecisionTreeClassifierBase):
 	1._chooseBestFeatureToSplit方法中不使用信息增益_calInformationGain而是信息增益比_calInformationGainRatio
 	2._fixdata方法需要保证特征向量全部为float型
 	'''
-	def _calInformationGainRatio(xtrain,ytrain,feat,splitVal):
+	def _calInformationGainRatio(self,xtrain,ytrain,feat,splitVal):
 		'''改写父类的同名方法,先根据特征feat和分割点spliVal将数据集一分为二，然后计算分割前后的指标增益'''	
+		xtrain = self._assert_xdata(xtrain)
+		ytrain = self._assert_ydata(ytrain)	
+
+		left_data,right_data = self._splitDataSet(xtrain,ytrain,feat,splitVal)
+		nexample = float(len(ytrain))
+		p_left = len(left_data[1]) / nexample
+		p_right = len(right_data[1]) / nexample
+		from math import log
+
+		#计算数据集划分前后的信息增益
+		baseEntropy = self._calInformationEntropy(ytrain)
+		newEntropy = 0
+		newEntropy += self._calInformationEntropy(left_data[1]) * p_left
+		newEntropy += self._calInformationEntropy(right_data[1]) * p_right
+		entropyGain = baseEntropy - newEntropy
+		
+		#计算以feat的splitVal进行二元划分时，训练数据集对此二元划分的熵
+		IV_feat = 0.0
+		IV_feat -= p_left * log(p_left,2)	
+		IV_feat -= p_right * log(p_right,2)	
+
+		entropyGainRatio = entropyGain / float(IV_feat)
+		return entropyGainRatio
+		
 	
 
 	def _chooseBestFeatureToSplit(self,xtrain,ytrain,epsion=0):
@@ -26,16 +50,19 @@ class C45Classifier(DecisionTreeClassifierBase):
 		bestFeat = None
 		bestSplitVal = None
 		for feat in range(numFeat):
-			splitValList = sorted(list(set(xtrain[:feat])))
+			splitValList = sorted(list(set(xtrain[:,feat])))
 			for i in range(len(splitValList)-1):
 				splitVal = (splitValList[i]+splitValList[i+1]) / 2.0				
+				#划分后的信息增益比
 				curGainRatio = self._calInformationGainRatio(xtrain,ytrain,feat,splitVal)
+				
 				if curGainRatio > bestGainRatio:
 					bestFeat = feat
 					bestSplitVal = splitVal
 					bestGainRatio = curGainRatio
 
-		if bestFeat != None and bestGainRatio > epsion:
+		#if bestFeat != None and bestGainRatio > epsion:
+		if bestFeat != None:
 			return bestFeat,bestSplitVal,bestGainRatio
 	
 	def _fixdata(self):
@@ -70,7 +97,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 		right_ydata = np.asarray(right_ydata,dtype=ydata.dtype)
 		return (left_xdata,left_ydata),(right_xdata,right_ydata)
 		
-	def _fit(self,xtrain,ytrain,examples,depth,max_depth,epsion=0):
+	def _fit(self,xtrain,ytrain,examples,depth,max_depth,epsion):
 		'''训练C4.5决策树分类器
 		ID3每个结点的可能子树数量为指定特征的取值数量，而C4.5每个结点的可能子树数量恒为2。
 		
@@ -111,7 +138,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 
 		bestFeat,bestSplitVal,loss = res	
 		resNode = self.Node(feature=bestFeat,
-					splitVal=splitVal,
+					splitVal=bestSplitVal,
 					loss=loss,
 					examples=examples,
 					depth=depth)
@@ -130,12 +157,14 @@ class C45Classifier(DecisionTreeClassifierBase):
 						ytrain=left_dataSet[1],
 						examples=left_dataSet,
 						depth=resNode._depth+1,
-						max_depth=max_depth)
+						max_depth=max_depth,
+						epsion=epsion)
 			right = self._fit(xtrain=right_dataSet[0],
 						ytrain=right_dataSet[1],
 						examples=right_dataSet,
 						depth=resNode._depth+1,
-						max_depth=max_depth)
+						max_depth=max_depth,
+						epsion=epsion)
 			#父结点指向对应孩子
 			resNode._left = left
 			resNode._right = right
@@ -157,6 +186,83 @@ class C45Classifier(DecisionTreeClassifierBase):
 			resNode._label = self._majority_class(ytrain)	
 		return resNode	
 
+	#-------------------------------------------------公开接口------------------------------------------------
+	def fit(self,xtrain=None,
+			ytrain=None,
+			examples=None,
+			depth=None,
+			max_depth=None,
+			alpha_leaf=0,
+			bool_prune=False,
+			epsion=0.0):
+		"""模型拟合的公开接口。若训练数据集未直接提供，则使用self._reader读取训练数据集
+		Args:
+			alpha_leaf:后剪枝对叶结点的正则化超参数,有效取值大于等于0.
+			epsion:float.默认为0.选取最优特征和最优分割点时，当前结点分裂前后指标(例如信息增益，基尼指数)
+				变化量的最小阈值。
+		"""
+		if xtrain is None or ytrain is None:
+			self._fixdata()
+			self._cur_model = self.DecisionTree()
+			self._fit(xtrain=self._reader._xtrain,
+					ytrain=self._reader._ytrain,
+					examples=(self._reader._xtrain,self._reader._ytrain),
+					depth=1,
+					max_depth=max_depth,
+					epsion=epsion)
+
+		else:
+			xtrain = self._assert_xdata(xtrain)
+			ytrain = self._assert_ydata(ytrain)
+			self._cur_model = self.DecisionTree()
+			self._fit(xtrain=self._reader._xtrain,
+					ytrain=self._reader._ytrain,
+					examples=(self._reader._xtrain,self._reader._ytrain),
+					depth=1,
+					max_depth=max_depth,
+					epsion=epsion)
+		if bool_prune:
+			self._prune(alpha_leaf=alpha_leaf)	
+
+	def bool_not_trained(self,tree=None):
+		'''判断决策树是否已经训练,仅判断根结点，默认在_fit和_prune方法的更新过程中其余结点维护了相应的特性'''
+		if tree is None:
+			tree = self._cur_model
+		if tree is None or tree._root is None:
+			return True
+		if tree._root._left is None and tree._root._right is None and tree._root._label is None:
+			return True
+		return False	
+
+	def predict(self,xtest=None,bool_use_stored_model=False):
+		'''模型预测的公开接口'''
+		if bool_use_stored_model:
+			use_model = self._stored_model
+			
+		else:
+			use_model = self._cur_model
+		if self.bool_not_trained(use_model):
+			raise self.NotTrainedError('无法进行预测，因为决策树分类器尚未训练!')
+
+		if xtest is None:
+			cur_xtest = self._reader.xtest
+		else:
+			cur_xtest = self._assert_xdata(xtest)
+
+		if use_model.is_leaf(use_model._root):
+			preds = [use_model._root._label] * len(cur_xtest)
+			return np.asarray(preds)
+
+		preds = [None] * len(cur_xtest) 
+		for i in range(len(cur_xtest)):
+			node = use_model._root
+			while not use_model.is_leaf(node):
+				if cur_xtest[i][node._feature] <= node._splitVal:
+					node = node._left
+				else:
+					node = node._right
+			preds[i] = node._label	
+		return np.asarray(preds)
 
 	def eval(self,bool_use_stored_model=False,method=None):
 		preds = self.predict(self._reader._xeval,bool_use_stored_model)	
@@ -185,6 +291,22 @@ class C45Classifier(DecisionTreeClassifierBase):
 		with open(cur_path,'rb') as f:
 			self._stored_model = pickle.load(f)
 		print('load_model done!')
+
+	def print_tree(self):
+		'''层序遍历输出决策树结点及结点关键信息'''
+		if self._cur_model is None:
+			use_model = self._stored_model
+		else:
+			use_model = self._cur_model
+
+		Q = collections.deque()
+		Q.append(use_model._root)
+		while len(Q) != 0:
+			node = Q.popleft()
+			node.showAttributes()
+			print('---\n')
+			for child in use_model.children(node):
+				Q.append(child)
 
 	class Node(DecisionTreeClassifierBase.Node):
 			'''决策树的结点类'''
@@ -229,9 +351,10 @@ class C45Classifier(DecisionTreeClassifierBase):
 				print('_depth:'+repr(self._depth))
 				print('父结点划分特征取值_parent_split_feature_val:'+repr(self._parent_split_feature_val))
 				print('当前划分属性_feature:'+repr(self._feature))
-				print('当前结点划分阈值_cur_split_val:'+repr(self._cur_split_val))
+				print('当前结点划分阈值_splitVal:'+repr(self._splitVal))
 				print('_loss:'+repr(self._loss))
 				print('_label:'+repr(self._label))
+				print('_examples:'+repr(self._examples))
 
 	class DecisionTree(DecisionTreeClassifierBase.DecisionTree):
 		'''决策树数据结构'''
@@ -304,14 +427,15 @@ class C45Classifier(DecisionTreeClassifierBase):
 
 
 if __name__ == '__main__':
-	obj = C45Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
-	print(obj._reader._xtrain)
-	obj._fixdata()
-	print(obj._reader._xtrain)
-	#obj.fit(alpha_leaf=0.55,bool_prune=True)
+	obj = C45Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forC45')
+	#print(obj._reader._xtrain)
+	#obj._fixdata()
+	#print(obj._reader._xtrain)
+	#obj.fit(alpha_leaf=0.55,bool_prune=False)
 	#obj.print_tree()
 	#obj.save_model()
-	#obj.load_model()
+	obj.load_model()
+	obj.print_tree()
 	#print('*************')
 	#print(obj._cur_model)
 	#print('*************')
@@ -336,8 +460,8 @@ if __name__ == '__main__':
 	#print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
 	#obj.fit(alpha_leaf=0,max_depth=3,bool_prune=True)
-	obj.fit(alpha_leaf=0,bool_prune=False)
-	obj.print_tree()
-	print(obj.eval(bool_use_stored_model=False)[0])
-	print(obj.eval(bool_use_stored_model=False)[1])
-	print(obj._cur_model._size)
+	#obj.fit(alpha_leaf=0,bool_prune=False)
+	#obj.print_tree()
+	print(obj.eval(bool_use_stored_model=True)[0])
+	print(obj.eval(bool_use_stored_model=True)[1])
+	print(obj._stored_model._size)
