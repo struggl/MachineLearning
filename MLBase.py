@@ -242,6 +242,7 @@ class DecisionTreeClassifierBase(ClassifierBase):
 	def _calInformationEntropy(self,ydata):
 		'''给定数据集D，计算数据集D的信息熵,信息熵取值越小越好.令K为类别数量，
 		Ent(D) = - sum_{k=1}^K p_k*log(p_k,2),其中p_k为第k类在数据集中出现的频率
+		Ent(D)最小值为0，最大值为log(K,2)
 		'''
 		ydata = self._assert_ydata(ydata)
 		from math import log
