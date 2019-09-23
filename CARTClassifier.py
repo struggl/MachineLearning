@@ -1,4 +1,4 @@
-'''ID3决策树实现'''
+'''CART实现分类器'''
 import numpy as np
 import collections
 
