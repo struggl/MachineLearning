@@ -85,7 +85,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 				self._cur_model.add_root(cur_node)
 			return	cur_node
 
-		bestFeat,loss = res	
+		bestFeat,gain = res	
 		bestFeatVals = set([example[bestFeat] for example in xtrain])
 		
 		resNode = self.Node(feature=global_labels[bestFeat],examples=examples,depth=depth)
@@ -114,7 +114,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		if self._cur_model.num_children(resNode) == 0:
 			resNode._feature = None
 			resNode._label = self._majority_class(ytrain)	
-		resNode._loss = loss
+		resNode._gain = gain
 		return resNode	
 
 	def _fixdata(self):
@@ -352,7 +352,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 	class Node(DecisionTreeClassifierBase.Node):
 		'''决策树的结点类'''
 		__slots__ = '_feature','_children','_label','_examples','_parent',\
-				'_depth','_parent_split_feature_val','_loss'
+				'_depth','_parent_split_feature_val','_gain'
 		def __init__(self,feature=None,label=None,examples=None,parent=None,
 				depth=None,parent_split_feat_val=None):
 			'''
@@ -373,14 +373,14 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			self._parent = parent	
 			self._depth = depth
 			self._parent_split_feature_val = None
-			#存储当前最优分裂结点对应的损失值(典型损失函数为信息增益、信息增益比、基尼指数)
-			self._loss = None
+			#存储当前最优分裂结点对应的指标增益(典型指标函数为信息增益、信息增益比、基尼指数)
+			self._gain = None
 	
 		def showAttributes(self):
 			print('_depth:'+repr(self._depth))
 			print('父结点划分特征取值_parent_split_feature_val:'+repr(self._parent_split_feature_val))
 			print('当前划分属性_feature:'+repr(self._feature))
-			print('当前划分属性_loss:'+repr(self._loss))
+			print('当前划分属性_gain:'+repr(self._gain))
 			#print('_children:'+repr(self._children))
 			print('_label:'+repr(self._label))
 			#print('_examples:'+repr(self._examples))
