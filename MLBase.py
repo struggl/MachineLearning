@@ -139,8 +139,39 @@ class ClassifierEvaluator(EvaluatorBase):
 
 class RegressorEvaluator(EvaluatorBase):
 	"""回归模型的评价器"""
-	def __init__(self):
+	def __init__(self,smallDigit=None):
+		super().__init__(smallDigit)
 		self._EvaluatorType = 'Regressor'
+
+	def _getMSE(self,predicts,ydata):
+		'''计算模型预测值与真实值的均方误差MSE'''
+		predicts = np.asarray(predicts,dtype='float64')
+		ydata = np.asarray(ydata,dtype='float64')
+		n = len(ydata)
+		if n == 0:
+			raise ValueError('模型预测值predicts和真实值ydata的长度不能为0')
+		
+		square_error = sum( (ydata - predicts) ** 2 )
+		n = len(ydata)
+		if n == 1:
+			return square_error
+		mse = square_error / (n-1)
+		return mse
+
+	def get_all_evaluation_method(self):
+		'''获取所有支持的评价方法'''
+		return {'mse'}	
+	
+	def eval(self,predicts,labels,method=None):
+		'''指定方法对模型结果进行评价
+		Args:
+			method:str.可选值在get_all_evaluation_method返回的集合中
+		'''		
+		if method is None or method == 'mse':
+			return self._getMSE(predicts,labels)	
+	
+		if method not in self.get_all_evaluation_method():
+			raise ValueError('method参数仅支持以下取值: '+repr(self.get_all_evaluation_method()))
 
 
 class ClassifierBase(LearnerBase):
@@ -158,9 +189,14 @@ class ClassifierBase(LearnerBase):
 
 class RegressorBase(LearnerBase):
 	"""所有回归器的基类"""
-	def __init__(self):
-		self._LearnerType = 'Classifier'
-		self._Evaluator = RegressorEvaluator()	
+	__slots__ = '_learnerType','_evaluator','_reader','_cur_model','_stored_model'
+	def __init__(self,dataDir,reader=None):
+		self._learnerType = 'Regressor'
+		self._evaluator = RegressorEvaluator()	
+		self._reader = reader if reader is not None else tsvReader(dataDir)
+		self._reader.read()
+		self._cur_model = None
+		self.stored_model = None
 
 
 class ReaderBase(metaclass=ABCMeta):
@@ -210,6 +246,97 @@ class tsvReader(ReaderBase):
 		if type(self._yeval) != None:
 			self._yeval = np.asarray(self._yeval,dtype='int64')	
 			
+class DecisionTreeRegressorBase(RegressorBase):
+	'''决策树回归器基类'''
+	def bool_not_trained(self,tree=None):
+		'''判断决策树是否已经训练'''
+		raise NotImplementedError
+
+	def _assert_xdata(self,xdata):
+		xdata = np.asarray(xdata)
+		assert xdata.ndim == 2 
+		assert len(xdata) != 0
+		return xdata
+
+	def _assert_ydata(self,ydata):
+		ydata = np.asarray(ydata)
+		assert ydata.ndim == 1
+		assert ydata.dtype == 'float64' or ydata.dtype == 'float32'
+		assert len(ydata) != 0
+		return ydata
+
+	def _calSSE(self,ydata):
+		'''计算平方误差和'''
+		ydata = np.asarray(ydata,dtype='float64')
+		n = len(ydata)
+		if n == 0:
+			return 0.0
+		SSE = sum( (ydata - np.mean(ydata)) ** 2 )
+		return SSE
+
+	def _splitDataSet(self,xtrain,ytrain,feat,val):
+		'''获取子数据集feat列上取值为val的子数据集
+		Args:
+			xtrain:np.ndarray,二维特征向量
+			ytrain:np.ndarray,维度是一。
+			feat:python int.指定列索引
+			val:python int.指定feat列的取值
+		'''
+		raise NotImplementedError
+
+
+	class Node(object):
+		'''决策树的结点类'''
+		def __init__(self):
+			raise NotImplementedError
+	
+		def showAttributes(self):
+			raise NotImplementedError
+
+	
+	class DecisionTree(object):
+		'''决策树数据结构'''
+		def __init__(self):
+			self._size = 0
+			self._root = None
+
+		def __len__(self):
+			return self._size
+
+		def _validate(self,node):
+			raise NotImplementedError
+
+		def is_leaf(self,node):
+			raise NotImplementedError
+
+		def is_root(self,node):
+			raise NotImplementedError
+		#-----------------------------访问方法-----------------------------
+		def preOrder(self,node=None):
+			'''从node开始进行前序遍历，若node为None，则从根开始遍历,返回一个迭代器'''
+			raise NotImplementedError
+
+		def parent(self,node):
+			'''返回给定node的父结点'''
+			raise NotImplementedError
+
+		def children(self,node):
+			'''返回给定结点node的孩子结点的迭代器'''
+			raise NotImplementedError
+
+		def sibling(self,node):
+			'''返回给定node结点的兄弟结点'''
+			raise NotImplementedError
+
+		def num_children(self,node):
+			'''返回给定node结点的非node孩子数'''
+			raise NotImplementedError
+			
+		
+		#-----------------------------更新方法------------------------------				
+		def add_root(self,node):
+			'''为决策树添加根结点，根结点深度设定为1'''
+			raise NotImplementedError
 
 class DecisionTreeClassifierBase(ClassifierBase):
 	'''决策树分类器基类'''
@@ -219,14 +346,12 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		
 	def _assert_xdata(self,xdata):
 		xdata = np.asarray(xdata)
-		assert type(xdata) is np.ndarray
 		assert xdata.ndim == 2 
 		assert len(xdata) != 0
 		return xdata
 
 	def _assert_ydata(self,ydata):
 		ydata = np.asarray(ydata)
-		assert type(ydata) is np.ndarray
 		assert ydata.ndim == 1
 		assert ydata.dtype == 'int64' or ydata.dtype == 'int32'
 		assert len(ydata) != 0
@@ -317,18 +442,13 @@ class DecisionTreeClassifierBase(ClassifierBase):
 		xdata = self._assert_xdata(xdata)
 		ydata = self._assert_ydata(ydata)
 			
-	def _splitDataSet(self,xtrain,ytrain,feat,val,
-				bool_return_examples=True,
-				bool_contain_feat_column=False):
+	def _splitDataSet(self,xtrain,ytrain,feat,val):
 		'''获取子数据集feat列上取值为val的子数据集
 		Args:
 			xtrain:np.ndarray,二维特征向量
 			ytrain:np.ndarray,维度是一。
 			feat:python int.指定列索引
 			val:python int.指定feat列的取值
-			bool_return_examples:bool.若为True,返回xtrain的feat列上取值为val的那些样本索引的可迭代对象(且支持__len__)
-			bool_contain_feat_column:bool.若为True,则采用CART决策树的二元划分策略，子数据集仍然包含feat这一列;
-				否则子数据集不保留feat所在列。
 		'''
 		raise NotImplementedError
 
