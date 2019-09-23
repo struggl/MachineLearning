@@ -1,0 +1,3 @@
+数据集来源：https://archive.ics.uci.edu/ml/machine-learning-databases/forest-fires/
+原数据集为forestfires.tsv,前12列为特征，最后一列为标签列
+这里为了方便，直接删除了month和day这两列标称型特征
