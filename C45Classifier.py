@@ -1,4 +1,4 @@
-'''ID3决策树实现'''
+'''C4.5决策树实现'''
 import numpy as np
 import collections
 
