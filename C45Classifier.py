@@ -6,10 +6,15 @@ from MLBase import DecisionTreeClassifierBase
 class C45Classifier(DecisionTreeClassifierBase):
 	'''C4.5决策树分类器，与ID3决策树实现的区别在于：
 	1._chooseBestFeatureToSplit方法中不使用信息增益_calInformationGain而是信息增益比_calInformationGainRatio
-	2._fixdata方法需要保证特征向量全部为float型
+	2.save_model与load_model方法的默认路径
+	3._fixdata方法需要保证特征向量全部为float型
 	'''
-	def _calInformationGainRatio(self,xtrain,ytrain,feat,splitVal):
-		'''改写父类的同名方法,先根据特征feat和分割点spliVal将数据集一分为二，然后计算分割前后的指标增益'''	
+	def __init__(self,dataDir,reader=None):
+		super().__init__(dataDir,reader)
+
+	def _calScore(self,xtrain,ytrain,feat,splitVal):
+		'''改写父类的同名方法,这里采用信息增益比指标。
+		先根据特征feat和分割点spliVal将数据集一分为二，然后计算分割前后的指标增益'''	
 		xtrain = self._assert_xdata(xtrain)
 		ytrain = self._assert_ydata(ytrain)	
 
@@ -54,7 +59,8 @@ class C45Classifier(DecisionTreeClassifierBase):
 			for i in range(len(splitValList)-1):
 				splitVal = (splitValList[i]+splitValList[i+1]) / 2.0				
 				#划分后的信息增益比
-				curGainRatio = self._calInformationGainRatio(xtrain,ytrain,feat,splitVal)
+				#curGainRatio = self._calInformationGainRatio(xtrain,ytrain,feat,splitVal)
+				curGainRatio = self._calScore(xtrain,ytrain,feat,splitVal)
 				
 				if curGainRatio > bestGainRatio:
 					bestFeat = feat
