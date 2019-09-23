@@ -42,7 +42,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 	
 
 	def _chooseBestFeatureToSplit(self,xtrain,ytrain,epsion=0):
-		'''使用信息增益比选择最优划分特征,若数据集特征数不大于0或最优划分的信息增益比大于阈值epsion，则返回None
+		'''使用信息增益比选择最优划分特征,若数据集特征数不大于0或最优划分的指标收益不大于阈值epsion，则返回None
 		Args:
 			epsion:每次结点划分时损失函数下降的阈值，默认为0
 		'''
@@ -51,25 +51,22 @@ class C45Classifier(DecisionTreeClassifierBase):
 		numFeat = len(xtrain[0])
 		if numFeat < 1:
 			return None
-		bestGainRatio = epsion
+		bestGain = epsion
 		bestFeat = None
 		bestSplitVal = None
 		for feat in range(numFeat):
 			splitValList = sorted(list(set(xtrain[:,feat])))
 			for i in range(len(splitValList)-1):
 				splitVal = (splitValList[i]+splitValList[i+1]) / 2.0				
-				#划分后的信息增益比
-				#curGainRatio = self._calInformationGainRatio(xtrain,ytrain,feat,splitVal)
-				curGainRatio = self._calScore(xtrain,ytrain,feat,splitVal)
+				#划分后的指标增益，若为C4.5，则为信息增益比，若为CART回归树则为均方误差
+				curGain = self._calScore(xtrain,ytrain,feat,splitVal)
 				
-				if curGainRatio > bestGainRatio:
+				if curGain > bestGain:
 					bestFeat = feat
 					bestSplitVal = splitVal
-					bestGainRatio = curGainRatio
-
-		#if bestFeat != None and bestGainRatio > epsion:
+					bestGain = curGain
 		if bestFeat != None:
-			return bestFeat,bestSplitVal,bestGainRatio
+			return bestFeat,bestSplitVal,bestGain
 	
 	def _fixdata(self):
 		self._reader._xtrain = np.asarray(self._reader._xtrain,dtype='float64')
@@ -142,10 +139,10 @@ class C45Classifier(DecisionTreeClassifierBase):
 				self._cur_model.add_root(cur_node)
 			return	cur_node
 
-		bestFeat,bestSplitVal,loss = res	
+		bestFeat,bestSplitVal,gain = res	
 		resNode = self.Node(feature=bestFeat,
 					splitVal=bestSplitVal,
-					loss=loss,
+					gain=gain,
 					examples=examples,
 					depth=depth)
 
@@ -317,7 +314,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 	class Node(DecisionTreeClassifierBase.Node):
 			'''决策树的结点类'''
 			__slots__ = '_feature','_label','_left','_right','_parent','_depth',\
-					'_examples','_parent_split_feature_val','_splitVal','_loss'
+					'_examples','_parent_split_feature_val','_splitVal','_gain'
 			def __init__(self,feature=None,
 						label=None,
 						left=None,
@@ -326,7 +323,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 						depth=None,
 						examples=None,
 						splitVal=None,
-						loss=None):
+						gain=None):
 				'''由于C4.5采用二元划分对连续属性进行分割，因此C4.5结点定义的属性与ID3有所区别
 				Args:
 					feature:存储当前结点的划分属性
@@ -337,7 +334,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 					depth:结点的深度,根结点设置深度为1
 					examples:tuple.每个结点存储了自己拥有的xtrain与ytrain
 					splitVal:float.存储了本结点分裂特征的分割阈值
-					loss:存储当前最优分裂结点对应的损失值(典型损失函数为信息增益、信息增益比、基尼指数)
+					gain:存储当前最优分裂结点对应的指标增益(典型指标函数为信息增益、信息增益比、基尼指数)
 
 				'''
 				self._feature = feature
@@ -348,7 +345,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 				self._depth = depth
 				self._examples = examples
 				self._splitVal = splitVal
-				self._loss = loss
+				self._gain = gain
 				#存储父结点的分裂特征及分割点取值
 				#格式为(bestFeat,bestSplitVal,'right')或(bestFeat,bestSplitVal,'left')			
 				self._parent_split_feature_val = None
@@ -358,7 +355,7 @@ class C45Classifier(DecisionTreeClassifierBase):
 				print('父结点划分特征取值_parent_split_feature_val:'+repr(self._parent_split_feature_val))
 				print('当前划分属性_feature:'+repr(self._feature))
 				print('当前结点划分阈值_splitVal:'+repr(self._splitVal))
-				print('_loss:'+repr(self._loss))
+				print('_gain:'+repr(self._gain))
 				print('_label:'+repr(self._label))
 				print('_examples:'+repr(self._examples))
 
