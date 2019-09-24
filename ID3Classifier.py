@@ -128,12 +128,14 @@ class ID3Classifier(DecisionTreeClassifierBase):
 		return node._examples
 	
 	def _loss(self,node):
-		'''后剪枝时计算叶结点的损失(不包含惩罚项)'''
+		'''后剪枝时计算叶结点node的损失(不包含惩罚项)'''
 		_,ydata = self._get_examples(node)
-		return self._calInformationEntropy(ydata)
+		return self._calInformationEntropy(ydata) * len(ydata)
 
 	def _prune(self,alpha_leaf):
-		'''决策树模型后剪枝的实现
+		'''决策树模型后剪枝的实现(李航<<统计学习方法>>p66),
+		记树T的叶结点数量为|T|,N_t为叶结点t的样本数量,H_t(T)为叶结点t上的信息熵
+		C_alpha(T) = sum_{t=1}^{|T|} N_t*H_t(T) + alpha*|T|
 		首先，对于同一个父结点的所有叶结点，是否满足剪枝条件的结论是一致的。记结点nd的兄弟结点为集合sibling
 		而实现过程中比较麻烦的情况：
 		1.某叶结点nd若可以上提叶结点(即令其父结点为叶结点)，则遍历到nd的sibling时，剪枝前叶结点数量len_before
@@ -212,7 +214,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			loss_before += alpha_leaf * len_before
 			loss_after += alpha_leaf * len_after
 			#决定是否剪枝
-			if loss_after < loss_before:
+			if loss_after <= loss_before:
 				'''剪枝的处理：
 				0.更新决策树_size属性为原来_size减去新叶结点原来的孩子数量
 				1.把父结点入队；
@@ -458,7 +460,7 @@ if __name__ == '__main__':
 	print(obj._reader._xtrain)
 	obj._fixdata()
 	print(obj._reader._xtrain)
-	#obj.fit(alpha_leaf=0.55,bool_prune=True)
+	obj.fit(alpha_leaf=0.55,bool_prune=True)
 	#obj.print_tree()
 	#obj.save_model()
 	#obj.load_model()
@@ -486,7 +488,7 @@ if __name__ == '__main__':
 	#print(obj.predict([[1,1,1,1,1,0]],True))
 	#obj.save_model()
 	#obj.fit(alpha_leaf=0,max_depth=3,bool_prune=True)
-	obj.fit(max_depth=1,bool_prune=False)
+	#obj.fit(max_depth=1,bool_prune=False)
 	obj.print_tree()
 	print(obj.eval(bool_use_stored_model=False)[0])
 	print(obj.eval(bool_use_stored_model=False)[1])
