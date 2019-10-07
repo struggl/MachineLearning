@@ -199,6 +199,19 @@ class RegressorBase(LearnerBase):
 		self.stored_model = None
 
 
+class LabelerBase(LearnerBase):
+	'''序列标注器的基类'''
+	__slots__ = '_learnerType','_evaluator','_reader','_cur_model','_stored_model'
+	def __init__(self,dataDir,reader=None):
+		self._learnerType = 'Labeler'
+		self._evaluator = LabelerEvaluator()	
+		self._reader = reader if reader is not None else tsvReaderForLabeler(dataDir)
+		self._reader.read()
+		self._cur_model = None
+		self.stored_model = None
+		
+
+
 class ReaderBase(metaclass=ABCMeta):
 	"""数据读取器基类,读取器对象存储数据，并提供数据预处理的方法"""
 	__slots__ = '_dataDir'
