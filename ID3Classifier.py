@@ -303,7 +303,7 @@ class ID3Classifier(DecisionTreeClassifierBase):
 			raise self.NotTrainedError('无法进行预测，因为决策树分类器尚未训练!')
 
 		if xtest is None:
-			cur_xtest = self._reader.xtest
+			cur_xtest = self._reader._xtest
 		else:
 			cur_xtest = self._assert_xdata(xtest)
 
@@ -459,8 +459,9 @@ if __name__ == '__main__':
 	obj = ID3Classifier(dataDir='/home/michael/data/GIT/MachineLearning/data/forID3')
 	print(obj._reader._xtrain)
 	obj._fixdata()
-	print(obj._reader._xtrain)
-	obj.fit(alpha_leaf=0.55,bool_prune=True)
+	print(obj._reader._xtest)
+	#obj.fit(alpha_leaf=0.55,bool_prune=True)
+	obj.fit(max_depth=3,bool_prune=False)
 	#obj.print_tree()
 	#obj.save_model()
 	#obj.load_model()
