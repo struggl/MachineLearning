@@ -33,6 +33,11 @@ class MaximumEntropy(ClassifierBase):
 		'''返回特征函数字典，值为列表，列表的第一个元素为特征函数(全局定义)，第二个元素为权重'''
 		feat_funs = collections.OrderedDict()
 		feat_funs['feat_1'] = [feat_1,0]
+		feat_funs['feat_2'] = [feat_2,0]
+		feat_funs['feat_3'] = [feat_3,0]
+		feat_funs['feat_4'] = [feat_4,0]
+		feat_funs['feat_5'] = [feat_5,0]
+		feat_funs['feat_6'] = [feat_6,0]
 		'''
 		feat_funs['feat_1'] = [feat_1,10]
 		feat_funs['feat_2'] = [feat_2,2]
@@ -119,7 +124,7 @@ class MaximumEntropy(ClassifierBase):
 		print('---')
 		print(self._count_prob_xy())
 
-	def fit(self,xtrain=None,ytrain=None,method=None,max_iterations=10):
+	def fit(self,xtrain=None,ytrain=None,method=None,max_iterations=100):
 		'''最大熵分类器训练的公开接口，默认使用IIS算法'''
 		if xtrain is None or ytrain is None:
 			xtrain = self._reader._xtrain
@@ -133,9 +138,16 @@ class MaximumEntropy(ClassifierBase):
 		pass
 
 	def _fit_IIS(self,xtrain,ytrain,max_iterations):
-		'''根据李航<<统计学习方法>>第六章 使用改进的迭代尺度算法(IIS)实现最大熵分类器训练'''	
+		'''根据李航<<统计学习方法>>第六章 使用改进的迭代尺度算法(IIS)实现最大熵分类器训练
+		核心公式是p90 式子(6.32)和p91 式子(6.35)
+		在计算(6.35)的时候，需要严格控制分母g_delta_derivative大于0.为此，
+		1.g_delta定义为(6.32)式的相反数，以使得g_delta_derivative不带负号
+		2.式子(6.35)中的p_w(y|x),f_i(x,y),f^#(x,y)均可能取0，因此要加上一个小正数，使它们严格为正
+		一个坑：所加的小正数不能太小，否则容易导致_predict计算时出现OverflowError.这里使用了0.01
+		'''	
 		if type(max_iterations) != int or max_iterations <= 0:
 			raise ValueError('使用改进的迭代尺度算法训练最大熵分类器时，max_iterations参数必须为正整数!')
+		smallDigit = 0.01
 		prob_x = self._count_prob_x()
 		prob_xy = self._count_prob_xy()
 		#每轮迭代
@@ -169,15 +181,20 @@ class MaximumEntropy(ClassifierBase):
 						y = [lb]
 						#计算f^#(x,y)
 						f_sharp_xy = sum( [val[0](x,y) for val in self._cur_model.values()] )
-						tmp = predDict[lb] * self._cur_model[feat][0](x,y) *\
-							math.exp( self._cur_model[feat][1] * f_sharp_xy )
+						f_sharp_xy += smallDigit
+						#tmp = ( predDict[lb] + 0.01 ) * ( self._cur_model[feat][0](x,y) + 0.01 )*\
+						#	math.exp( self._cur_model[feat][1] * f_sharp_xy )
+						pwyx = predDict[lb] + smallDigit
+						fixy = self._cur_model[feat][0](x,y) + smallDigit
+						delta_i = self._cur_model[feat][1]
+						tmp = pwyx * fixy * math.exp(delta_i*f_sharp_xy)
 						Sum += tmp
 						Sum_derivative += tmp * f_sharp_xy
 					g_delta2 += prob * Sum
 					g_delta_derivative += prob * Sum_derivative
-				g_delta = g_delta1 - g_delta2	
+				g_delta = g_delta2 - g_delta1	
 				#本次迭代，特征函数feat对应权重的减少量
-				delta = g_delta / ( g_delta_derivative + self._evaluator._smallDigit )
+				delta = g_delta / g_delta_derivative
 				self._cur_model[feat][1] -= delta
 						
 	def _predict(self,xtest,use_model=None):
