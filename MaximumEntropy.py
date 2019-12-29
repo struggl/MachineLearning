@@ -133,6 +133,46 @@ class MaximumEntropy(ClassifierBase):
 			self._fit_IIS(xtrain,ytrain,max_iterations)
 		elif method == 'BFGS':
 			self._fit_BFGS(xtrain,ytrain)
+		elif method == 'MLE':
+			self._fit_MLE(xtrain,ytrain,max_iterations)
+
+	def _fit_MLE(self,xtrain,ytrain,max_iterations):
+		'''直接根据李航<<统计学习方法>>p87对数似然函数对权重向量求导
+		'''
+		if max_iterations <= 0:
+			raise ValueError('max_iterations参数必须为正整数!')
+		smallDigit = 0.01
+		#分别计算经验分布P(x)和经验分布P(x,y)
+		prob_x = self._count_prob_x()
+		prob_xy = self._count_prob_xy()
+		#每轮迭代
+		for i in range(max_iterations):
+			#权重调整量字典记为delta
+			delta = dict()
+			#对每个特征函数
+			for feat in self._cur_model.keys():	#注意对各个特征函数的访问顺序问题
+				first = 0
+				for xy,prob in prob_xy:
+					x = x[:-1]	
+					y = x[-1]
+					first += prob * self._cur_model[feat][0](x,y)
+
+				second = 0
+				for x,prob in prob_x:
+					fenzi = 0
+					fenmu = 0
+					for y in ytrain:	
+						f,w = self._cur_model[feat]
+						fenzi += np.exp(w*f(x,y)) * f(x,y)
+						fenmu += np.wxp(w*f(x,y))
+					second += prob * fenzi / (fenmu + smallDigit)
+				
+				delta[feat] = first - second
+			#进行权重微调
+			#此处与_fit_IIS的异步调整不同，是同步调整,在一次迭代中，用上一次迭代的权重计算出所有权重的
+			#待调整量，本次迭代的最后一次性调整，并进入下一次迭代	
+			for feat in self.cur_model.keys():
+				self.cur_model[feat][1] += delta[feat]
 
 	def _fit_BFGS(self,xtrain,ytrain):
 		pass
@@ -152,7 +192,8 @@ class MaximumEntropy(ClassifierBase):
 		prob_xy = self._count_prob_xy()
 		#每轮迭代
 		for i in range(max_iterations):
-			#每个特征函数
+			#每个特征函数,注意，这里的实现方式是异步的，即：先调整第一个特征函数的权重，而这个新权重被立即
+			#应用到第二个特征函数权重的调整之中
 			for feat in self._cur_model.keys():
 				#计算p90式(6.32) 的第一项
 				g_delta1 = 0.0
@@ -240,12 +281,17 @@ class MaximumEntropy(ClassifierBase):
 
 if __name__ == '__main__':
 	obj = MaximumEntropy(dataDir='/home/michael/data/GIT/MachineLearning/data/forMaximumEntropy')
+	print('--训练前模型如下--\n')
 	print(obj._cur_model)
-	print(obj.eval(bool_use_stored_model=False)[0])
-	print(obj.eval(bool_use_stored_model=False)[1])
-	print('----')
-	obj.fit()
+	#print(obj.eval(bool_use_stored_model=False)[0])
+	#print(obj.eval(bool_use_stored_model=False)[1])
+	obj.fit(method='IIS',max_iterations=20)
+	#obj.fit(method='MLE',max_iterations=20)
+
+	print('--训练后模型如下--\n')
 	print(obj._cur_model)
+
+	print('--模型评估--\n')
 	print(obj.eval(bool_use_stored_model=False)[0])
 	print(obj.eval(bool_use_stored_model=False)[1])
 	
