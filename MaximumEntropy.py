@@ -152,27 +152,27 @@ class MaximumEntropy(ClassifierBase):
 			#对每个特征函数
 			for feat in self._cur_model.keys():	#注意对各个特征函数的访问顺序问题
 				first = 0
-				for xy,prob in prob_xy:
-					x = x[:-1]	
-					y = x[-1]
+				for xy,prob in prob_xy.items():
+					x = xy[:-1]	
+					y = xy[-1]
 					first += prob * self._cur_model[feat][0](x,y)
 
 				second = 0
-				for x,prob in prob_x:
+				for x,prob in prob_x.items():
 					fenzi = 0
 					fenmu = 0
 					for y in ytrain:	
 						f,w = self._cur_model[feat]
 						fenzi += np.exp(w*f(x,y)) * f(x,y)
-						fenmu += np.wxp(w*f(x,y))
+						fenmu += np.exp(w*f(x,y))
 					second += prob * fenzi / (fenmu + smallDigit)
 				
 				delta[feat] = first - second
 			#进行权重微调
 			#此处与_fit_IIS的异步调整不同，是同步调整,在一次迭代中，用上一次迭代的权重计算出所有权重的
 			#待调整量，本次迭代的最后一次性调整，并进入下一次迭代	
-			for feat in self.cur_model.keys():
-				self.cur_model[feat][1] += delta[feat]
+			for feat in self._cur_model.keys():
+				self._cur_model[feat][1] += delta[feat]
 
 	def _fit_BFGS(self,xtrain,ytrain):
 		pass
@@ -283,10 +283,13 @@ if __name__ == '__main__':
 	obj = MaximumEntropy(dataDir='/home/michael/data/GIT/MachineLearning/data/forMaximumEntropy')
 	print('--训练前模型如下--\n')
 	print(obj._cur_model)
+	print('--模型评估--\n')
+	print(obj.eval(bool_use_stored_model=False)[0])
+	print(obj.eval(bool_use_stored_model=False)[1])
 	#print(obj.eval(bool_use_stored_model=False)[0])
 	#print(obj.eval(bool_use_stored_model=False)[1])
-	obj.fit(method='IIS',max_iterations=20)
-	#obj.fit(method='MLE',max_iterations=20)
+	#obj.fit(method='IIS',max_iterations=20)
+	obj.fit(method='MLE',max_iterations=20)
 
 	print('--训练后模型如下--\n')
 	print(obj._cur_model)
